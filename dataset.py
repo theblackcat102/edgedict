@@ -170,13 +170,14 @@ if __name__ == "__main__":
 
     transforms = torchaudio.transforms.MFCC(n_mfcc=40)
     dataset = CommonVoice('../common_voice', transforms=[transforms])
+    print(dataset.vocab_size)
     yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
     dataset = MergedDataset([dataset, yt_dataset])
     dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=10, num_workers=4)
     for batch in dataloader:
         xs, ys, xlen, ylen = batch
-        # print(xs.shape)
-        # break
+        print(xs.shape)
+        break
 
     data, tokens = dataset[0]
     print(data.shape)

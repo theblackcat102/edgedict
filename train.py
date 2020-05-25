@@ -106,8 +106,9 @@ class Trainer():
                 y, nll = self.model.greedy_decode(xs)
                 hypothesis = self.tokenizer.decode(y)
                 ground_truth = self.tokenizer.decode(ys[0].numpy())
-                error = wer(ground_truth, hypothesis)
-                wers.append(error)
+                measures = jiwer.compute_measures(ground_truth, hypothesis)
+                wers.append(measures['wer'])
+                # can measure others: mer, wil
                 if len(wers) > evaluate_size:
                     break
 
