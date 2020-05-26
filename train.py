@@ -155,7 +155,7 @@ class Trainer():
                     pbar.set_description(
                         'loss: %.4f' % (loss.item()))
 
-            if epoch % 2 == 0 and epoch > 0:
+            if epoch > 0:
                 self.model.eval()
                 print(self.evaluate())
                 self.model.train()

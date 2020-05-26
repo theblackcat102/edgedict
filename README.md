@@ -28,7 +28,7 @@ python models.py
 
     ii. Download corpus using this repo: https://github.com/clovaai/voxceleb_trainer
 
-1. Common Voice : ?1000 hrs
+1. Common Voice : 178.621 hrs
 
 '''
 mkdir common_voice

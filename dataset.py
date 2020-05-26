@@ -15,6 +15,7 @@ class MergedDataset(Dataset):
         self.offsets = [  ]
         for d in datasets:
             total_length += len(d)
+            print(str(d), ' : ', len(d))
             self.offsets.append(total_length)
 
         self.total_length = total_length
@@ -35,7 +36,7 @@ class MergedDataset(Dataset):
 
 class YoutubeCaption(Dataset):
     def __init__(self, path, labels='english_meta.csv', 
-        audio_max_length=18, audio_min_length=1 ,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
+        audio_max_length=15, audio_min_length=1 ,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_'+ labels
         wav_path = labels.split('_')[0]
@@ -51,7 +52,7 @@ class YoutubeCaption(Dataset):
                 file_path = os.path.join(path, wav_path,filename)
                 try:
                     if os.path.exists(file_path):
-                        data, sr = torchaudio.load(file_path)
+                        data, sr = torchaudio.load(file_path, normalization=False)
                         if sr == sampling_rate:
                             audio_length = len(data[0])//sr
                             voice['Transcription'] = str(voice['Transcription'])
@@ -93,7 +94,7 @@ class YoutubeCaption(Dataset):
 
 class CommonVoice(Dataset):
 
-    def __init__(self, path, labels='train.tsv', audio_max_length=18,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
+    def __init__(self, path, labels='train.tsv', audio_max_length=15,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_'+ labels.replace('.tsv', '.csv')
 
@@ -108,7 +109,7 @@ class CommonVoice(Dataset):
                 file_path = os.path.join(path, 'clips',filename)
                 try:
                     if os.path.exists(file_path):
-                        data, sr = torchaudio.load(file_path)
+                        data, sr = torchaudio.load(file_path, normalization=False)
                         if sr == sampling_rate:
                             audio_length = len(data[0])//sr
                             if audio_length < audio_max_length:
@@ -151,7 +152,7 @@ class CommonVoice(Dataset):
 
 
 class Librispeech(Dataset):
-    def __init__(self, path, audio_max_length=18, transforms=None, sampling_rate=16000, tokenizer=CharTokenizer()):
+    def __init__(self, path, audio_max_length=15, transforms=None, sampling_rate=16000, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_label.csv'
 
@@ -167,10 +168,10 @@ class Librispeech(Dataset):
                     for line in f.readlines():
                         filename = line.split(' ')[0]
                         wav_path = os.path.join( dir_path, filename + '.flac')
-                        data, sr = torchaudio.load(wav_path)
+                        audio_frames, sr = torchaudio.load(wav_path, normalization=False)
                         if sr == sampling_rate:
                             text = line.replace(filename, '').strip().lower()
-                            audio_length = len(data[0])//sr
+                            audio_length = len(audio_frames[0])//sr
                             if audio_length < audio_max_length:
                                 total_secs += audio_length
                                 self.data.append({
@@ -212,7 +213,7 @@ class TEDLIUM(Dataset):
     PAUSE_MATCH = re.compile('\([0-9]\)')
     NOTATION = re.compile('\{[A-Z]*\}')
 
-    def __init__(self, path, audio_max_length=18, transforms=None, sampling_rate=16000, tokenizer=CharTokenizer()):
+    def __init__(self, path, audio_max_length=15, transforms=None, sampling_rate=16000, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_label.csv'
         wav_dir = os.path.join(path, 'wav')
@@ -263,7 +264,7 @@ class TEDLIUM(Dataset):
 
     def __getitem__(self, idx):
         voice = self.data[idx]
-        file_path = voice['path']
+        file_path = os.path.join(self.path, voice['path'])
 
         data, sr = torchaudio.load(file_path, normalization=True)
 
@@ -281,7 +282,7 @@ class TEDLIUM(Dataset):
 
 
 class VoxCeleb(Dataset):
-    def __init__(self, path, labels='train.tsv', audio_max_length=5,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
+    def __init__(self, path, labels='train.tsv', audio_max_length=15, sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
         self.path = path
 
 
@@ -316,9 +317,9 @@ if __name__ == "__main__":
     transforms = torchaudio.transforms.MFCC(n_mfcc=40)
     dataset = TEDLIUM('../TEDLIUM/TEDLIUM_release1/train/')
     dataset = Librispeech('../LibriSpeech/train-clean-360/')
-    dataset = CommonVoice('../common_voice', labels='test.tsv',transforms=[transforms])
+    # dataset = CommonVoice('../common_voice', labels='test.tsv',transforms=[transforms])
     # print(dataset.vocab_size)
-    dataset = CommonVoice('../common_voice', transforms=[transforms])
+    # dataset = CommonVoice('../common_voice', transforms=[transforms])
     # print(dataset.vocab_size)
 
     # yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
