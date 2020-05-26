@@ -2,13 +2,13 @@
 
 ### TODO
 
-[] Parallelize model training
+- [ ] Parallelize model training
 
-[] Use BPE instead of character based tokenizer, should reduce more memory
+- [ ] Use BPE instead of character based tokenizer, should reduce more memory
 
-[] Write checkpointing and tensorboardX logger
+- [ ] Write checkpointing and tensorboardX logger
 
-[] Modify wraprnnt-pytorch to compatible with apex mixed precision
+- [ ] Modify wraprnnt-pytorch to compatible with apex mixed precision
 
 ### Install:
 
