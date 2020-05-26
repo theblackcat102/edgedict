@@ -1,5 +1,15 @@
 # RNN-Transducer example
 
+### TODO
+
+- [ ] Parallelize model training
+
+- [ ] Use BPE instead of character based tokenizer, should reduce more memory
+
+- [ ] Write checkpointing and tensorboardX logger
+
+- [ ] Modify wraprnnt-pytorch to compatible with apex mixed precision
+
 ### Install:
 
 Make sure warprnnt pytorch is installed
@@ -10,6 +20,7 @@ Execute models.py to check if everything is properly installed
 python models.py
 ```
 
+
 ### Datasets:
 
 0. VoxCeleb
@@ -18,7 +29,7 @@ python models.py
 
     ii. Download corpus using this repo: https://github.com/clovaai/voxceleb_trainer
 
-1. Common Voice
+1. Common Voice : ?1000 hrs
 
     ```
     mkdir common_voice

@@ -24,17 +24,19 @@ def end_pad_concat(inputs, pad_idx=0):
     return labels
 
 
-class CharTokenizer():
+DEFAULT_TOKEN2ID = {
+    '<pad>': 0,
+    '<bos>': 1,
+    '<eos>': 2,
+    '<unk>': 3,
+}
 
+
+class CharTokenizer():
     def __init__(self):
         valid_tokens = string.ascii_lowercase + string.punctuation + ' '
 
-        self.token2id = {
-            '<pad>': 0,
-            '<bos>': 1,
-            '<eos>': 2,
-            '<unk>': 3,
-        }
+        self.token2id = dict(DEFAULT_TOKEN2ID)
 
         self.id2token = {}
         for idx, token in enumerate(valid_tokens):
@@ -46,7 +48,7 @@ class CharTokenizer():
         self.vocab_size = len(self.id2token)
 
     def encode(self, text, max_length=-1):
-        text = text.lower()
+        text = str(text).lower()
         if max_length > 1:
             text = text[:max_length]
         return [self.token2id[char] if char in self.token2id else 3 for char in text]

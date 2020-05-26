@@ -5,8 +5,6 @@ import hashlib
 import glob
 import tarfile
 
-from tqdm import tqdm
-
 # ========== ===========
 # Parse input arguments
 # ========== ===========
@@ -100,22 +98,6 @@ def extract(args):
 
 
 # ========== ===========
-# Convert
-# ========== ===========
-def convert(args):
-    files = glob.glob(os.path.join(args.save_path, 'LibriSpeech/*/*/*/*.flac'))
-    files.sort()
-
-    print('Converting files from FLAC to WAV')
-    for fname in tqdm(files):
-        outfile = fname.replace('.flac', '.wav')
-        out = subprocess.call(
-            'ffmpeg -y -i %s -ac 1 -vn -acodec pcm_s16le -ar 16000 %s >/dev/null 2>/dev/null' % (fname, outfile), shell=True)
-        if out != 0:
-            raise ValueError('Conversion failed %s.' % fname)
-
-
-# ========== ===========
 # Main script
 # ========== ===========
 if __name__ == "__main__":
@@ -127,6 +109,3 @@ if __name__ == "__main__":
 
     if args.extract:
         extract(args)
-
-    if args.convert:
-        convert(args)
