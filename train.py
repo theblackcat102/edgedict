@@ -10,7 +10,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import torchaudio
 from models import Transducer
-from dataset import CommonVoice, seq_collate, YoutubeCaption, MergedDataset
+from dataset import CommonVoice, seq_collate, YoutubeCaption, MergedDataset, Librispeech
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from tensorboardX import SummaryWriter
@@ -62,13 +62,14 @@ if args.apex:
 class Trainer():
 
     def __init__(self, args):
-        transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat, melkwargs={'n_fft':512, 'win_length': 512})
+        transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat, melkwargs={'n_fft':1024, 'win_length': 1024})
         dataset = CommonVoice(
          '../common_voice', transforms=[transforms]   
         )
         yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
-        dataset = MergedDataset([dataset, yt_dataset])
+        librispeech = Librispeech('../LibriSpeech/train-clean-360/', transforms=[transforms])
 
+        dataset = MergedDataset([dataset, yt_dataset, librispeech])
         self.dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=args.batch_size, 
             num_workers=4, shuffle=True)
 
@@ -80,8 +81,8 @@ class Trainer():
 
         self.args = args
         self.model = Transducer(args.audio_feat, dataset.vocab_size,
-            32,
-            64, 
+            16, # vocab embedding dim
+            128, # hidden dim
             args.layers).cuda()
         self.gradclip = args.gradclip
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr)
@@ -147,7 +148,7 @@ class Trainer():
                     pbar.set_description(
                         'loss: %.4f' % (loss.item()))
 
-            if epoch % 5 == 0 and epoch > 10:
+            if epoch % 2 == 0 and epoch > 0:
                 self.model.eval()
                 print(self.evaluate())
                 self.model.train()

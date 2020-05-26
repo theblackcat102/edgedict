@@ -47,7 +47,7 @@ class CharTokenizer():
 
 
     def encode(self, text, max_length=-1):
-        text = text.lower()
+        text = str(text).lower()
         if max_length > 1:
             text = text[:max_length]
         return [ self.token2id[char]  if char in self.token2id else 3 for char in text]

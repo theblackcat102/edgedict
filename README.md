@@ -34,6 +34,14 @@ tar -zxvf en.tar.gz
 2. Youtube Caption 
 
 
+3. Librispeech release 1
+
+```
+pip install git+https://github.com/mcfletch/sphfile.git
+
+```
+
+
 ## Data path
 ```
 
@@ -60,3 +68,6 @@ git clone https://github.com/NVIDIA/apex
 cd apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 ```
+
+
+

@@ -14,7 +14,7 @@ class RNNModel(nn.Module):
         self.vocab_size = vocab_size
         self.blank = blank
         # lstm hidden vector: (h_0, c_0) num_layers * num_directions, batch, hidden_size
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+        self.lstm = nn.GRU(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         if bidirectional: hidden_size *= 2
         self.linear = nn.Linear(hidden_size, vocab_size)
 
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     from torch.autograd import Variable
     import numpy as np
 
-    model = Transducer(128, 3600, 64, 2).cuda()
+    model = Transducer(128,3600,8 ,64, 2).cuda()
     x = torch.randn((32, 128, 128)).float().cuda()
     y = torch.randint(0, 3500, (32, 10)).long().cuda()
     xlen = torch.from_numpy(np.array([128]*32)).int()
