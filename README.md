@@ -1,5 +1,15 @@
 # RNN-Transducer example
 
+### TODO
+
+[] Parallelize model training
+
+[] Use BPE instead of character based tokenizer, should reduce more memory
+
+[] Write checkpointing and tensorboardX logger
+
+[] Modify wraprnnt-pytorch to compatible with apex mixed precision
+
 ### Install:
 
 Make sure warprnnt pytorch is installed
