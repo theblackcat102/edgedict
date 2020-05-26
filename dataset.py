@@ -33,7 +33,8 @@ class MergedDataset(Dataset):
             prev = offset
 
 class YoutubeCaption(Dataset):
-    def __init__(self, path, labels='english_meta.csv', audio_max_length=15,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
+    def __init__(self, path, labels='english_meta.csv', 
+        audio_max_length=18, audio_min_length=1 ,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_'+ labels
         wav_path = labels.split('_')[0]
@@ -42,19 +43,25 @@ class YoutubeCaption(Dataset):
         if os.path.exists(os.path.join(path, processed_labels)):
             self.data = list(pd.read_csv(os.path.join(path, processed_labels)).T.to_dict().values())
         else:
+            total_secs = 0
             df = pd.read_csv(os.path.join(path, labels)).T.to_dict().values()
             for voice in tqdm(df, dynamic_ncols=True):
                 filename = voice['ID']
                 file_path = os.path.join(path, wav_path,filename)
-                if os.path.exists(file_path):
-                    data, sr = torchaudio.load(file_path)
-                    if sr == sampling_rate:
-                        audio_length = len(data[0])//sr
-                        if audio_length < audio_max_length:
-                            voice['path'] = filename
-                            self.data.append(voice)
+                try:
+                    if os.path.exists(file_path):
+                        data, sr = torchaudio.load(file_path)
+                        if sr == sampling_rate:
+                            audio_length = len(data[0])//sr
+                            voice['Transcription'] = str(voice['Transcription'])
+                            if audio_length < audio_max_length and audio_length > audio_min_length and ' ' in voice['Transcription']:
+                                total_secs += audio_length
+                                self.data.append(voice)
+                except RuntimeError:
+                    continue
             pd.DataFrame(self.data).to_csv(os.path.join(path, processed_labels))
             print('size {}'.format(len(self.data)))
+            print('hrs {}'.format(total_secs/3600))
 
         self.tokenizer = tokenizer
         self.transforms = transforms
@@ -85,7 +92,7 @@ class YoutubeCaption(Dataset):
 
 class CommonVoice(Dataset):
 
-    def __init__(self, path, labels='train.tsv', audio_max_length=15,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
+    def __init__(self, path, labels='train.tsv', audio_max_length=18,sampling_rate=16000, transforms=None, tokenizer=CharTokenizer()):
         self.data = []
         processed_labels = 'preprocessed_'+ labels.replace('.tsv', '.csv')
 
@@ -94,7 +101,7 @@ class CommonVoice(Dataset):
             self.data = list(pd.read_csv(os.path.join(path, processed_labels)).T.to_dict().values())
         else:
             df = pd.read_csv(os.path.join(path, labels), sep='\t').T.to_dict().values()
-
+            total_secs = 0
             for voice in tqdm(df, dynamic_ncols=True):
                 filename = voice['path'].replace('.mp3', '.wav')
                 file_path = os.path.join(path, 'clips',filename)
@@ -105,9 +112,11 @@ class CommonVoice(Dataset):
                         audio_length = len(data[0])//sr
                         if audio_length < audio_max_length:
                             voice['path'] = filename
+                            total_secs += audio_length
                             self.data.append(voice)
             pd.DataFrame(self.data).to_csv(os.path.join(path, processed_labels))
             print('size {}'.format(len(self.data)))
+            print('hrs {}'.format(total_secs/3600))
 
         self.tokenizer = tokenizer
         self.transforms = transforms
@@ -168,9 +177,14 @@ def seq_collate(results):
 
 if __name__ == "__main__":
 
+
     transforms = torchaudio.transforms.MFCC(n_mfcc=40)
+    dataset = CommonVoice('../common_voice', labels='test.tsv',transforms=[transforms])
+    print(dataset.vocab_size)
+
     dataset = CommonVoice('../common_voice', transforms=[transforms])
     print(dataset.vocab_size)
+
     yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
     dataset = MergedDataset([dataset, yt_dataset])
     dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=10, num_workers=4)

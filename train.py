@@ -14,12 +14,13 @@ from dataset import CommonVoice, seq_collate, YoutubeCaption, MergedDataset
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from tensorboardX import SummaryWriter
+import jiwer
 
 
 parser = argparse.ArgumentParser(description='RNN-T')
 parser.add_argument('--name', type=str, default='rnn-t')
 
-parser.add_argument('--lr', type=float, default=2e-4,
+parser.add_argument('--lr', type=float, default=1e-3,
                     help='initial learning rate')
 parser.add_argument('--epochs', type=int, default=200,
                     help='upper epoch limit')
@@ -61,14 +62,15 @@ if args.apex:
 class Trainer():
 
     def __init__(self, args):
-        transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat)
+        transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat, melkwargs={'n_fft':512, 'win_length': 512})
         dataset = CommonVoice(
          '../common_voice', transforms=[transforms]   
         )
         yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
         dataset = MergedDataset([dataset, yt_dataset])
 
-        self.dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=args.batch_size, num_workers=4)
+        self.dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=args.batch_size, 
+            num_workers=4, shuffle=True)
 
         val_dataset = CommonVoice(
              '../common_voice', labels='test.tsv',transforms=[transforms]   
@@ -97,7 +99,6 @@ class Trainer():
             break
 
     def evaluate(self, evaluate_size=1000):
-        from jiwer import wer
         wers = []
         with torch.no_grad():
             for batch in self.val_dataloader:
@@ -138,7 +139,7 @@ class Trainer():
                         loss.backward()
 
                     if self.gradclip:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10.0)
                     self.optimizer.step()
 
                     pbar.update(1)
@@ -146,7 +147,7 @@ class Trainer():
                     pbar.set_description(
                         'loss: %.4f' % (loss.item()))
 
-            if epoch % 10 == 0 and epoch > 100:
+            if epoch % 5 == 0 and epoch > 10:
                 self.model.eval()
                 print(self.evaluate())
                 self.model.train()
