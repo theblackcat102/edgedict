@@ -106,15 +106,18 @@ class CommonVoice(Dataset):
             for voice in tqdm(df, dynamic_ncols=True):
                 filename = voice['path'].replace('.mp3', '.wav')
                 file_path = os.path.join(path, 'clips',filename)
+                try:
+                    if os.path.exists(file_path):
+                        data, sr = torchaudio.load(file_path)
+                        if sr == sampling_rate:
+                            audio_length = len(data[0])//sr
+                            if audio_length < audio_max_length:
+                                voice['path'] = filename
+                                total_secs += audio_length
+                                self.data.append(voice)
+                except RuntimeError:
+                    continue
 
-                if os.path.exists(file_path):
-                    data, sr = torchaudio.load(file_path)
-                    if sr == sampling_rate:
-                        audio_length = len(data[0])//sr
-                        if audio_length < audio_max_length:
-                            voice['path'] = filename
-                            total_secs += audio_length
-                            self.data.append(voice)
             pd.DataFrame(self.data).to_csv(os.path.join(path, processed_labels))
             print('size {}'.format(len(self.data)))
             print('hrs {}'.format(total_secs/3600))
@@ -312,11 +315,10 @@ if __name__ == "__main__":
 
     transforms = torchaudio.transforms.MFCC(n_mfcc=40)
     dataset = TEDLIUM('../TEDLIUM/TEDLIUM_release1/train/')
-    # dataset = Librispeech('../LibriSpeech/train-clean-360/')
-    # dataset = CommonVoice('../common_voice', labels='test.tsv',transforms=[transforms])
+    dataset = Librispeech('../LibriSpeech/train-clean-360/')
+    dataset = CommonVoice('../common_voice', labels='test.tsv',transforms=[transforms])
     # print(dataset.vocab_size)
-
-    # dataset = CommonVoice('../common_voice', transforms=[transforms])
+    dataset = CommonVoice('../common_voice', transforms=[transforms])
     # print(dataset.vocab_size)
 
     # yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])

@@ -10,7 +10,13 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import torchaudio
 from models import Transducer
-from dataset import CommonVoice, seq_collate, YoutubeCaption, MergedDataset, Librispeech
+from dataset import (
+    CommonVoice, 
+    YoutubeCaption,
+    Librispeech,
+    TEDLIUM,
+    seq_collate, MergedDataset
+)
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from tensorboardX import SummaryWriter
@@ -63,13 +69,14 @@ class Trainer():
 
     def __init__(self, args):
         transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat, melkwargs={'n_fft':1024, 'win_length': 1024})
-        dataset = CommonVoice(
-         '../common_voice', transforms=[transforms]   
-        )
+
+        common_voice = CommonVoice('../common_voice', transforms=[transforms])
         yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
         librispeech = Librispeech('../LibriSpeech/train-clean-360/', transforms=[transforms])
+        tedlium = TEDLIUM('../TEDLIUM/TEDLIUM_release1/train/', transforms=[transforms])
 
-        dataset = MergedDataset([dataset, yt_dataset, librispeech])
+        dataset = MergedDataset([common_voice, yt_dataset, librispeech, tedlium])
+
         self.dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=args.batch_size, 
             num_workers=4, shuffle=True)
 
