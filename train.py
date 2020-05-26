@@ -1,20 +1,15 @@
-import os
-import time
-import random
 import argparse
-import logging
 import numpy as np
 import torch
-from torch import nn, autograd
-from torch.autograd import Variable
-import torch.nn.functional as F
 import torchaudio
-from models import Transducer
-from dataset import CommonVoice, seq_collate, YoutubeCaption, MergedDataset
-from tqdm import tqdm
-from torch.utils.data import DataLoader, Dataset
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 import jiwer
+
+from models import Transducer
+from dataset import (
+    CommonVoice, YoutubeCaption, LibreSpeech, MergedDataset, seq_collate)
+from tqdm import tqdm
+from torch.utils.data import DataLoader
 
 
 parser = argparse.ArgumentParser(description='RNN-T')
@@ -30,19 +25,20 @@ parser.add_argument('--dropout', type=float, default=0,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--layers', type=int, default=2,
                     help='number rnn layers')
-parser.add_argument('--audio-feat', default=40, type=int, 
+parser.add_argument('--audio-feat', default=40, type=int,
                     help='audio feature dimension size')
-parser.add_argument('--bi', default=False, action='store_true', 
+parser.add_argument('--bi', default=False, action='store_true',
                     help='whether use bidirectional lstm')
-parser.add_argument('--apex', default=False, action='store_true', 
+parser.add_argument('--apex', default=False, action='store_true',
                     help='use mix precision')
-parser.add_argument('--opt_level', default='O1', type=str, 
+parser.add_argument('--opt_level', default='O1', type=str,
                     help='operation level')
 parser.add_argument('--noise', default=False, action='store_true',
                     help='add Gaussian weigth noise')
 parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                     help='report interval')
-parser.add_argument('--stdout', default=False, action='store_true', help='log in terminal')
+parser.add_argument('--stdout', default=False, action='store_true',
+                    help='log in terminal')
 parser.add_argument('--out', type=str, default='exp/rnnt_lr1e-3',
                     help='path to save the final model')
 parser.add_argument('--cuda', default=True, action='store_false')
@@ -60,36 +56,44 @@ if args.apex:
 
 
 class Trainer():
-
     def __init__(self, args):
-        transforms = torchaudio.transforms.MFCC(n_mfcc=args.audio_feat, melkwargs={'n_fft':512, 'win_length': 512})
-        dataset = CommonVoice(
-         '../common_voice', transforms=[transforms]   
-        )
-        yt_dataset = YoutubeCaption('../youtube-speech-text/', transforms=[transforms])
-        dataset = MergedDataset([dataset, yt_dataset])
+        transforms = torchaudio.transforms.MFCC(
+            n_mfcc=args.audio_feat, melkwargs={'n_fft': 512, 'win_length': 512})
+        # cv_dataset = CommonVoice(
+        #     '../common_voice', transforms=[transforms])
+        # yt_dataset = YoutubeCaption(
+        #     '../youtube-speech-text/', transforms=[transforms])
+        ls_dataset = LibreSpeech(
+            '/nfs/lab2/dataset/libri_speech/LibriSpeech/train-clean-100',
+            transforms=[transforms])
+        # dataset = MergedDataset([cv_dataset, yt_dataset])
+        dataset = ls_dataset
 
-        self.dataloader = DataLoader(dataset, collate_fn=seq_collate, batch_size=args.batch_size, 
+        self.dataloader = DataLoader(
+            dataset, collate_fn=seq_collate, batch_size=args.batch_size,
             num_workers=4, shuffle=True)
 
-        val_dataset = CommonVoice(
-             '../common_voice', labels='test.tsv',transforms=[transforms]   
-        )
+        # val_dataset = CommonVoice(
+        #      '../common_voice', labels='test.tsv', transforms=[transforms])
+        val_dataset = LibreSpeech(
+            '/nfs/lab2/dataset/libri_speech/LibriSpeech/test-clean',
+            transforms=[transforms])
         self.tokenizer = val_dataset.tokenizer
-        self.val_dataloader = DataLoader(val_dataset, collate_fn=seq_collate, batch_size=1, num_workers=4)
+        self.val_dataloader = DataLoader(
+            val_dataset, collate_fn=seq_collate, batch_size=1, num_workers=4)
 
         self.args = args
-        self.model = Transducer(args.audio_feat, dataset.vocab_size,
+        self.model = Transducer(
+            args.audio_feat, dataset.vocab_size,
             32,
-            64, 
+            64,
             args.layers).cuda()
         self.gradclip = args.gradclip
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr)
 
         if args.apex:
-            self.model, self.optimizer = amp.initialize(self.model, self.optimizer,
-                opt_level=args.opt_level)
-
+            self.model, self.optimizer = amp.initialize(
+                self.model, self.optimizer, opt_level=args.opt_level)
 
     def test(self):
         for batch in self.dataloader:
@@ -116,9 +120,8 @@ class Trainer():
         return np.mean(wers), np.std(wers)
 
     def train(self):
-
-        from datetime import datetime
-        cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        # from datetime import datetime
+        # cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
         # writer = SummaryWriter('logs/{}-{}'.format(self.args.name, cur_time))
 
         for epoch in range(self.args.epochs):
@@ -151,6 +154,7 @@ class Trainer():
                 self.model.eval()
                 print(self.evaluate())
                 self.model.train()
+
 
 if __name__ == "__main__":
     trainer = Trainer(args)
