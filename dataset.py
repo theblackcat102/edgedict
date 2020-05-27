@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torchaudio
 import torch
+import torchaudio.transforms as transforms
 from sphfile import SPHFile
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
@@ -303,34 +304,74 @@ def seq_collate(results):
     return xs, ys, xlen, ylen
 
 
+class Compose:
+    def __init__(self, transform_list):
+        self.transform_list = transform_list
+
+    def __call__(self, x):
+        for transform in self.transform_list:
+            x = transform(x)
+        return x
+
+
+class LogMelSpectrogram(transforms.MelSpectrogram):
+    """
+    ref: https://github.com/noahchalifour/rnnt-speech-recognition/blob/a0d972f5e407e465ad784c682fa4e72e33d8eefe/utils/preprocessing.py#L48
+    """
+    def forward(self, waveform):
+        mel_specs = super().forward(waveform)
+        log_mel_specs = torch.log(mel_specs + 1e-6)
+        log_mel_specs -= torch.mean(log_mel_specs, dim=0, keepdim=True)
+        return log_mel_specs
+
+
+class DownsampleSpectrogram:
+    def __init__(self, n_frame):
+        self.n_frame = n_frame
+
+    def __call__(self, spec):
+        feat_size, spec_length = spec.shape
+        spec_length = (spec_length // self.n_frame) * self.n_frame
+        spec_sampled = spec[:, :spec_length]
+        spec_sampled = spec_sampled.reshape(feat_size * self.n_frame, -1)
+        return spec_sampled
+
+
 if __name__ == "__main__":
-    transforms = torchaudio.transforms.MFCC(n_mfcc=40)
+    sr = 16000
+    transform = Compose([
+        LogMelSpectrogram(
+            sample_rate=sr, win_length=int(0.025 * sr),
+            hop_length=int(0.01 * sr), n_fft=512, f_min=125, f_max=7600,
+            n_mels=80),
+        DownsampleSpectrogram(n_frame=3)
+    ])
     # Test
     librispeech = Librispeech(
-        '../LibriSpeech/test-clean/', transforms=[transforms])
-    commonvoice = CommonVoice(
-        '../common_voice', labels='test.tsv', transforms=[transforms])
-    dataset = MergedDataset([librispeech, commonvoice])
+        '../LibriSpeech/test-clean/', transforms=[transform])
+    # commonvoice = CommonVoice(
+    #     '../common_voice', labels='test.tsv', transforms=[transform])
+    dataset = MergedDataset([librispeech])
     dataloader = DataLoader(
-        dataset, collate_fn=seq_collate, batch_size=10, num_workers=4)
+        dataset, collate_fn=seq_collate, batch_size=8, num_workers=4)
     for i, (xs, ys, xlen, ylen) in enumerate(dataloader):
         print(xs.shape)
         if i == 3:
             break
 
     # Train
-    # youtubecaption = YoutubeCaption(
-    #     '../youtube-speech-text/', transforms=[transforms])
-    # tedlium = TEDLIUM(
-    #     '../TEDLIUM/TEDLIUM_release1/train/', transforms=[transforms])
     librispeech = Librispeech(
-        '../LibriSpeech/train-clean-100/', transforms=[transforms])
-    commonvoice = CommonVoice(
-        '../common_voice', labels='train.tsv', transforms=[transforms])
+        '../LibriSpeech/train-clean-100/', transforms=[transform])
+    # commonvoice = CommonVoice(
+    #     '../common_voice', labels='train.tsv', transforms=[transform])
+    # youtubecaption = YoutubeCaption(
+    #     '../youtube-speech-text/', transforms=[transform])
+    # tedlium = TEDLIUM(
+    #     '../TEDLIUM/TEDLIUM_release1/train/', transforms=[transform])
 
-    dataset = MergedDataset([librispeech, commonvoice])
+    dataset = MergedDataset([librispeech])
     dataloader = DataLoader(
-        dataset, collate_fn=seq_collate, batch_size=10, num_workers=4)
+        dataset, collate_fn=seq_collate, batch_size=8, num_workers=4)
     for i, (xs, ys, xlen, ylen) in enumerate(dataloader):
         print(xs.shape)
         if i == 3:

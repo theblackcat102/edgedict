@@ -2,6 +2,18 @@ import string
 import torch
 
 
+PAD = 0
+BOS = 1
+EOS = 2
+UNK = 3
+DEFAULT_TOKEN2ID = {
+    '<pad>': PAD,
+    '<bos>': BOS,
+    '<eos>': EOS,
+    '<unk>': UNK,
+}
+
+
 def zero_pad_concat(inputs):
     # Pad audio feature sets
     max_t = max(inp.shape[0] for inp in inputs)
@@ -14,22 +26,14 @@ def zero_pad_concat(inputs):
     return input_mat
 
 
-def end_pad_concat(inputs, pad_idx=0):
+def end_pad_concat(inputs):
     # Pad text token sets
     max_t = max(i.shape[0] for i in inputs)
     shape = (len(inputs), max_t)
-    labels = torch.full(shape, fill_value=pad_idx).long()
+    labels = torch.full(shape, fill_value=PAD).long()
     for e, l in enumerate(inputs):
         labels[e, :len(l)] = l
     return labels
-
-
-DEFAULT_TOKEN2ID = {
-    '<pad>': 0,
-    '<bos>': 1,
-    '<eos>': 2,
-    '<unk>': 3,
-}
 
 
 class CharTokenizer():
@@ -40,21 +44,21 @@ class CharTokenizer():
 
         self.id2token = {}
         for idx, token in enumerate(valid_tokens):
-            self.token2id[token] = idx+4
+            self.token2id[token] = idx + 4
 
         for token, idx in self.token2id.items():
             self.id2token[idx] = token
 
         self.vocab_size = len(self.id2token)
 
-    def encode(self, text, max_length=-1):
+    def encode(self, text, max_length=None):
         text = str(text).lower()
-        if max_length > 1:
-            text = text[:max_length]
-        return [self.token2id[char] if char in self.token2id else 3 for char in text]
+        text = text[:max_length]
+        text = [self.token2id.get(char, UNK) for char in text]
+        return text
 
     def decode(self, tokens):
-        text = ''.join([self.id2token[t] if t in self.id2token else '' for t in tokens ])
+        text = ''.join([self.id2token.get(token, '') for token in tokens])
         text = text.replace('<pad>', '')
         text = text.replace('<eos>', '')
         return text
