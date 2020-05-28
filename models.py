@@ -1,32 +1,28 @@
-import math
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-from tokenizer import DEFAULT_TOKEN2ID, BOS
+from tokenizer import NUL, PAD, BOS
 # from ctc_decoder import decode as ctc_beam
 
 
 class Transducer(nn.Module):
     def __init__(self, input_size, vocab_size, vocab_embed_size, hidden_size,
-                 num_layers, dropout=0, bidirectional=False,
-                 blank=DEFAULT_TOKEN2ID['<pad>']):
+                 num_layers, dropout=0, blank=NUL):
         super(Transducer, self).__init__()
         self.blank = blank
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.num_direction = 2 if bidirectional else 1
         # Encoder
         self.encoder = nn.GRU(
             input_size, hidden_size, num_layers, batch_first=True,
-            dropout=dropout, bidirectional=bidirectional)
-        self.encoder_fc = nn.Linear(
-            hidden_size * self.num_direction, hidden_size)
+            dropout=dropout)
+        self.encoder_fc = nn.Linear(hidden_size, hidden_size)
         # Decoder
         self.embed = nn.Embedding(
-            vocab_size, vocab_embed_size, padding_idx=blank)
+            vocab_size, vocab_embed_size, padding_idx=PAD)
         # NOTE!!!!, (h, c) is always length First
         self.decoder = nn.LSTM(
             vocab_embed_size, hidden_size, num_layers=1, batch_first=True)

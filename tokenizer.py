@@ -2,11 +2,13 @@ import string
 import torch
 
 
-PAD = 0
-BOS = 1
-EOS = 2
-UNK = 3
+NUL = 0
+PAD = 1
+BOS = 2
+EOS = 3
+UNK = 4
 DEFAULT_TOKEN2ID = {
+    '<nul>': NUL,
     '<pad>': PAD,
     '<bos>': BOS,
     '<eos>': EOS,

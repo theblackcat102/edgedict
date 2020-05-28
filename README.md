@@ -29,7 +29,7 @@ python models.py
 
     ii. Download corpus using this repo: https://github.com/clovaai/voxceleb_trainer
 
-1. Common Voice : ?1000 hrs
+1. Common Voice : 178.621 hrs
 
     ```
     mkdir common_voice
@@ -42,11 +42,25 @@ python models.py
 
     ii. execute preprocess_common_voice.py to convert audio to 16k, PCM 16bits wav files ( this takes around 20 hours )
 
-2. Youtube Caption
+2. Youtube Caption : 118 hrs
 
-3. LibriSpeech
+
+3. Librispeech release 1 : 348 hrs
+
     ```
-    python dataprep_librispeech.py [path/to/data] --download --extract --convert
+    python dataprep_librispeech.py [path/to/data] --download --extract
+    ```
+
+4. TEDLIUM: 118.05 hrs
+
+    Either download release 1 or 3 ( version 1 is smaller )
+
+    SPHFile needed to extract audio segments based on timestamp from STM files
+
+    ```
+    wget http://www.openslr.org/resources/51/TEDLIUM_release-3.tgz
+    wget http://www.openslr.org/resources/51/TEDLIUM_release-1.tgz
+    pip install git+https://github.com/mcfletch/sphfile.git
     ```
 
 
@@ -75,3 +89,6 @@ git clone https://github.com/NVIDIA/apex
 cd apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 ```
+
+
+

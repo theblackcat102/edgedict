@@ -3,22 +3,24 @@ import os
 import textwrap
 from datetime import datetime
 
+import jiwer
 import numpy as np
 import torch
+import torchaudio.transforms as transforms
 from tensorboardX import SummaryWriter
-import jiwer
-
-from models import Transducer
-from dataset import (
-    seq_collate, MergedDataset,
-    Librispeech,
-    # CommonVoice,
-    # YoutubeCaption,
-    # TEDLIUM,
-)
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from warprnnt_pytorch import RNNTLoss
+
+from models import Transducer
+from tokenizer import NUL
+from dataset import (
+    seq_collate, MergedDataset,
+    CommonVoice,
+    TEDLIUM,
+    Librispeech,
+    # YoutubeCaption,
+)
 
 
 parser = argparse.ArgumentParser(description='RNN-T')
@@ -32,7 +34,7 @@ parser.add_argument('--epochs', type=int, default=200,
                     help='upper epoch limit')
 parser.add_argument('--batch_size', type=int, default=1,
                     help='batch size')
-parser.add_argument('--eval_batch_size', type=int, default=16,
+parser.add_argument('--eval_batch_size', type=int, default=64,
                     help='batch size')
 parser.add_argument('--gradclip', default=None, type=float,
                     help='clip norm value')
@@ -43,12 +45,13 @@ parser.add_argument('--num_layers', type=int, default=3,
                     help='number rnn layers')
 parser.add_argument('--vocab_embed_size', type=int, default=16,
                     help='vocab embedding dim')
-parser.add_argument('--hidden_size', type=int, default=256,
+parser.add_argument('--hidden_size', type=int, default=128,
                     help='RNN hidden dimension')
 parser.add_argument('--audio_feat', default=40, type=int,
                     help='audio feature dimension size')
-parser.add_argument('--bidirectional', default=False, action='store_true',
-                    help='whether use bidirectional lstm')
+# data preprocess
+parser.add_argument('--audio_max_length', type=int, default=12,
+                    help='audio max length')
 # apex
 parser.add_argument('--apex', default=False, action='store_true',
                     help='use mix precision')
@@ -57,6 +60,9 @@ parser.add_argument('--opt_level', default='O1', type=str,
 # parallel
 parser.add_argument('--multi_gpu', action='store_true',
                     help='DataParallel')
+# log
+parser.add_argument('--save_epoch', type=int, default=5,
+                    help='frequency to save model')
 device = torch.device('cuda:0')
 
 args = parser.parse_args()
@@ -67,53 +73,52 @@ if args.apex:
 class Trainer():
     def __init__(self, args):
         self.args = args
-        # transforms = transforms.MFCC(
-        #     n_mfcc=args.audio_feat,
-        #     melkwargs={'n_fft': 1024, 'win_length': 1024})
-        sr = 16000
-        transforms = Compose([
-            LogMelSpectrogram(
-                sample_rate=sr, win_length=0.025 * sr, hop_length=0.01 * sr,
-                n_fft=512, f_min=125, f_max=7600, n_mels=80),
-            DownsampleSpectrogram(n_frame=3)
+        transform = transforms.MFCC(
+            n_mfcc=args.audio_feat,
+            melkwargs={'n_fft': 1024, 'win_length': 1024})
+
+        train_dataset = MergedDataset([
+            CommonVoice(
+                '../common_voice', labels='train.tsv',
+                transforms=[transform],
+                audio_max_length=args.audio_max_length),
+            Librispeech(
+                '../LibriSpeech/train-clean-360/', transforms=[transform],
+                audio_max_length=args.audio_max_length),
+            TEDLIUM(
+                '../TEDLIUM_release1/train/', transforms=[transform],
+                audio_max_length=args.audio_max_length),
         ])
-
-        train_librispeech = Librispeech(
-            '../LibriSpeech/train-clean-360/', transforms=[transforms])
-        # train_common_voice = CommonVoice(
-        #     '../common_voice', labels='train.tsv', transforms=[transforms])
-        # train_yt_dataset = YoutubeCaption(
-        #     '../youtube-speech-text/', transforms=[transforms])
-        # train_tedlium = TEDLIUM(
-        #     '../TEDLIUM/TEDLIUM_release1/train/', transforms=[transforms])
-
-        train_dataset = MergedDataset([train_librispeech])
         self.dataloader = DataLoader(
             train_dataset, batch_size=args.batch_size, shuffle=True,
             num_workers=4, collate_fn=seq_collate)
 
-        val_librispeech = Librispeech(
-            '../LibriSpeech/test-clean/', transforms=[transforms])
-        # val_common_voice = CommonVoice(
-        #      '../common_voice', labels='test.tsv', transforms=[transforms])
-        val_dataset = MergedDataset([val_librispeech])
+        val_dataset = MergedDataset([
+            # CommonVoice(
+            #     '../common_voice', labels='test.tsv',
+            #     transforms=[transform]),
+            # TEDLIUM(
+            #     '../TEDLIUM_release1/test/', transforms=[transform]),
+            Librispeech(
+                '../LibriSpeech/test-clean/', transforms=[transform]),
+        ])
         self.val_dataloader = DataLoader(
-            val_dataset, batch_size=args.eval_batch_size, shuffle=False,
+            val_dataset, batch_size=args.batch_size, shuffle=False,
             num_workers=4, collate_fn=seq_collate)
-        self.tokenizer = val_librispeech.tokenizer
 
+        self.tokenizer = val_dataset.tokenizer
         self.model = Transducer(
-            args.audio_feat, train_dataset.vocab_size, args.vocab_embed_size,
-            args.hidden_size, args.num_layers, args.dropout,
-            args.bidirectional).to(device)
+            args.audio_feat, train_dataset.vocab_size,
+            args.vocab_embed_size, args.hidden_size, args.num_layers,
+            args.dropout).to(device)
         if args.multi_gpu:
             self.model = torch.nn.DataParallel(self.model)
         self.optim = torch.optim.Adam(
             self.model.parameters(), lr=args.lr)
-        self.sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optim, mode='min', factor=0.5, patience=10, verbose=1,
-            min_lr=1e-6)
-        self.loss_fn = RNNTLoss()
+        # self.sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optim, mode='min', factor=0.5, patience=10, verbose=1,
+        #     min_lr=1e-6)
+        self.loss_fn = RNNTLoss(blank=NUL)
 
         if args.apex:
             self.model, self.optim = amp.initialize(
@@ -129,7 +134,7 @@ class Trainer():
             `Pred: %s`
             ''')
 
-    def save_model(self, epoch):
+    def save(self, epoch):
         if not os.path.exists(os.path.join(self.logdir, 'models')):
             os.mkdir(os.path.join(self.logdir, 'models'))
         if self.args.multi_gpu:
@@ -140,7 +145,7 @@ class Trainer():
         torch.save(
             ckpt, os.path.join(self.logdir, 'models', 'epoch-%d' % epoch))
 
-    def evaluate(self, epoch, evaluate_size=1000, write_size=100):
+    def evaluate(self, epoch, write_size=100):
         self.model.eval()
         write_count = 0
         wers = []
@@ -182,8 +187,11 @@ class Trainer():
 
     def train(self):
         self.evaluate(epoch=0)
+        self.save(epoch=0)
+
         for epoch in range(1, self.args.epochs + 1):
             print(f'[epoch: {epoch}]')
+            losses = []
             with tqdm(total=len(self.dataloader), dynamic_ncols=True) as pbar:
                 for batch in self.dataloader:
                     xs, ys, xlen, ylen = [x.to(device) for x in batch]
@@ -199,12 +207,18 @@ class Trainer():
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(), self.args.gradclip)
                     self.optim.step()
+                    losses.append(loss.item())
 
-                    self.writer.add_scalar('loss', loss)
                     pbar.update(1)
                     pbar.set_description('loss: %.4f' % (loss.item()))
+            loss = np.mean(losses)
+            self.writer.add_scalar('loss', loss, epoch)
+
             val_loss = self.evaluate(epoch)
-            self.sched.step(val_loss)
+            # self.sched.step(val_loss)
+
+            if epoch % self.args.save_epoch == 0:
+                self.save(epoch)
 
 
 if __name__ == "__main__":
