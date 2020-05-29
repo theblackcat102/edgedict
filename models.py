@@ -7,28 +7,180 @@ from tokenizer import NUL, PAD, BOS
 # from ctc_decoder import decode as ctc_beam
 
 
+class TimeReduction(nn.Module):
+    def __init__(self, reduction_factor=2):
+        super().__init__()
+        self.reduction_factor = reduction_factor
+
+    def forward(self, xs):
+        batch_size, xlen, hidden_size = xs.shape
+        pad_shape = [[0, 0], [0, xlen % self.reduction_factor], [0, 0]]
+        xs = nn.functional.pad(xs, pad_shape)
+        xs = xs.view(batch_size, -1, self.reduction_factor, hidden_size)
+        xs = xs.mean(dim=2)
+        return xs
+
+
+class LayerNormRNN(nn.Module):
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 num_layers,
+                 dropout=0,
+                 proj_size=None,
+                 time_reductions=None):
+        super().__init__()
+        self.rnns = nn.ModuleList()
+        self.projs = nn.ModuleList()
+        if proj_size is None:
+            proj_size = hidden_size
+        for i in range(num_layers):
+            self.rnns.append(
+                nn.LSTM(input_size, hidden_size, 1, batch_first=True))
+            if time_reductions is not None and i in time_reductions:
+                proj = [TimeReduction(reduction_factor=2)]
+            else:
+                proj = []
+            if proj_size is not None:
+                proj.append([nn.Linear(hidden_size, proj_size)])
+                output_size = proj_size
+            else:
+                output_size = hidden_size
+            proj.extend([
+                nn.Dropout(dropout),
+                nn.LayerNorm(output_size)
+            ])
+            self.projs.append(nn.Sequential(*proj))
+            input_size = output_size
+
+    def forward(self, xs, hiddens=None):
+        if hiddens is None:
+            hiddens = [None for _ in range(len(self.rnns))]
+        new_hiddens = []
+        for rnn, proj, hidden in zip(self.rnns, self.projs, hiddens):
+            xs, new_hidden = rnn(xs, hidden)
+            new_hiddens.append(new_hidden)
+        hs, cs = zip(*new_hiddens)
+        hs = torch.stack(hs, dim=0)
+        cs = torch.stack(cs, dim=0)
+        return xs, (hs, cs)
+
+
+class Transducerv2(nn.Module):
+    def __init__(self,
+                 vocab_size,
+                 vocab_embed_size,
+                 audio_feat_size,
+                 hidden_size=2048,
+                 enc_num_layers=8,
+                 enc_dropout=0,
+                 dec_num_layers=2,
+                 dec_dropout=0,
+                 proj_size=640,
+                 blank=NUL):
+        super(Transducerv2, self).__init__()
+        self.blank = blank
+        # Encoder
+        self.encoder = LayerNormRNN(
+            input_size=audio_feat_size,
+            hidden_size=hidden_size,
+            num_layers=enc_num_layers,
+            dropout=enc_dropout,
+            proj_size=proj_size,
+            time_reductions=[1],
+            RNN=nn.LSTM)
+        # Decoder
+        self.embed = nn.Embedding(
+            vocab_size, vocab_embed_size, padding_idx=PAD)
+        self.decoder = LayerNormRNN(
+            input_size=vocab_embed_size,
+            hidden_size=hidden_size,
+            num_layers=dec_num_layers,
+            dropout=dec_dropout,
+            proj_size=proj_size,
+            time_reductions=None,
+            RNN=nn.LSTM)
+        # Joint
+        self.joint = nn.Sequential(
+            nn.Linear(hidden_size, proj_size),
+            nn.Tanh(),
+            nn.Linear(proj_size, vocab_size),
+        )
+
+    def forward(self, xs, ys):
+        # encoder
+        h_enc, _ = self.encoder(xs)
+        # decoder
+        bos = ys.new_ones((ys.shape[0], 1)).long() * BOS
+        h_pre = torch.cat([bos, ys], dim=-1)
+        h_pre, _ = self.decoder(self.embed(h_pre))
+        # expand
+        h_enc = h_enc.unsqueeze(dim=2)
+        h_pre = h_pre.unsqueeze(dim=1)
+        # joint
+        prob = self.joint(h_enc + h_pre)
+        return prob
+
+    def greedy_decode(self, xs, xlen):
+        # encoder
+        h_enc, _ = self.encoder(xs)
+        # initialize decoder
+        bos = xs.new_ones(xs.shape[0], 1).long() * BOS
+        h_pre, (h, c) = self.decoder(self.embed(bos))     # decode first zero
+        y_seq = []
+        log_p = []
+        # greedy
+        for i in range(h_enc.shape[1]):
+            # joint
+            logits = self.joint(h_enc[:, i] + h_pre[:, 0])
+            probs = F.log_softmax(logits, dim=1)
+            prob, pred = torch.max(probs, dim=1)
+            y_seq.append(pred)
+            log_p.append(prob)
+            embed_pred = self.embed(pred.unsqueeze(1))
+            new_h_pre, (new_h, new_c) = self.decoder(embed_pred, (h, c))
+            # replace non blank entities with new state
+            h_pre[pred != self.blank, ...] = new_h_pre[pred != self.blank, ...]
+            h[:, pred != self.blank, :] = new_h[:, pred != self.blank, :]
+            c[:, pred != self.blank, :] = new_c[:, pred != self.blank, :]
+        y_seq = torch.stack(y_seq, dim=1)
+        log_p = torch.stack(log_p, dim=1).sum(dim=1)
+        ret_y = []
+        # truncat to xlen and remove blank token
+        for seq, seq_len in zip(y_seq, xlen):
+            seq = seq.cpu().numpy()[:seq_len]
+            ret_y.append(list(filter(lambda tok: tok != self.blank, seq)))
+        return ret_y, -log_p
+
+
 class Transducer(nn.Module):
-    def __init__(self, input_size, vocab_size, vocab_embed_size, hidden_size,
-                 num_layers, dropout=0, blank=NUL):
+    def __init__(self,
+                 vocab_size,
+                 vocab_embed_size,
+                 audio_feat_size,
+                 hidden_size,
+                 enc_num_layers,
+                 enc_dropout=0,
+                 dec_num_layers=None,
+                 dec_dropout=0,
+                 blank=NUL):
         super(Transducer, self).__init__()
         self.blank = blank
-        self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
         # Encoder
-        self.encoder = nn.GRU(
-            input_size, hidden_size, num_layers, batch_first=True,
-            dropout=dropout)
+        self.encoder = nn.LSTM(
+            audio_feat_size, hidden_size, enc_num_layers,
+            batch_first=True, dropout=enc_dropout)
         self.encoder_fc = nn.Linear(hidden_size, hidden_size)
         # Decoder
         self.embed = nn.Embedding(
             vocab_size, vocab_embed_size, padding_idx=PAD)
         # NOTE!!!!, (h, c) is always length First
         self.decoder = nn.LSTM(
-            vocab_embed_size, hidden_size, num_layers=1, batch_first=True)
+            vocab_embed_size, hidden_size, dec_num_layers,
+            batch_first=True, dropout=dec_dropout)
         # Joint
         self.joint = nn.Sequential(
-            nn.Linear(2 * hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
             nn.Linear(hidden_size, vocab_size),
         )
@@ -46,10 +198,8 @@ class Transducer(nn.Module):
         # expand
         h_enc = h_enc.unsqueeze(dim=2)
         h_pre = h_pre.unsqueeze(dim=1)
-        h_enc = h_enc.expand(-1, -1, h_pre.shape[2], -1)
-        h_pre = h_pre.expand(-1, h_enc.shape[1], -1, -1)
         # joint
-        prob = self.joint(torch.cat([h_enc, h_pre], dim=-1))
+        prob = self.joint(h_enc + h_pre)
         return prob
 
     def greedy_decode(self, xs, xlen):
@@ -64,7 +214,7 @@ class Transducer(nn.Module):
         # greedy
         for i in range(h_enc.shape[1]):
             # joint
-            logits = self.joint(torch.cat([h_enc[:, i], h_pre[:, 0]], dim=-1))
+            logits = self.joint(h_enc[:, i] + h_pre[:, 0])
             probs = F.log_softmax(logits, dim=1)
             prob, pred = torch.max(probs, dim=1)
             y_seq.append(pred)

@@ -2,6 +2,9 @@ logs
 .vscode/
 save/
 outputs/
+BPE
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

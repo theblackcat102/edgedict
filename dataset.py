@@ -1,5 +1,6 @@
 import glob
 import os
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -9,33 +10,39 @@ import torchaudio.transforms as transforms
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
-from tokenizer import CharTokenizer, zero_pad_concat, end_pad_concat
+from tokenizer import zero_pad_concat, end_pad_concat
+import transforms as mtransforms
 
 
 class MergedDataset(ConcatDataset):
     def __init__(self, datasets):
         super().__init__(datasets)
+        self.datasets = datasets
         self.total_length = 0
-        for d in datasets:
-            self.total_length += len(d)
-        self.vocab_size = self.datasets[0].vocab_size
+        for dataset in datasets:
+            self.total_length += len(dataset)
         self.tokenizer = datasets[0].tokenizer
-        self.vocab_size = self.tokenizer.vocab_size
+
+    def texts(self):
+        texts = []
+        for dataset in self.datasets:
+            texts.extend(dataset.texts())
+        return texts
 
 
 class AudioDataset(Dataset):
-    def __init__(self, root, session='', desc='AudioDataset',
+    def __init__(self, root, tokenizer, session='', desc='AudioDataset',
                  audio_max_length=99, audio_min_length=1, sampling_rate=16000,
-                 transforms=None, tokenizer=CharTokenizer()):
+                 transforms=None):
         self.root = root
-        processed_labels = os.path.join(root, 'preprocessed_' + session)
+        processed_labels = os.path.join(
+            root, 'preprocessed_v3_%s.pkl' % session)
 
         if os.path.exists(processed_labels):
-            self.data = list(
-                pd.read_csv(processed_labels).T.to_dict().values())
+            data = pickle.load(open(processed_labels, 'rb'))
         else:
-            self.data = []
-            total_secs = 0
+            print(processed_labels)
+            data = []
             paths, texts = self.build()
             pairs = list(zip(paths, texts))
             for path, text in tqdm(pairs, dynamic_ncols=True, desc=desc):
@@ -44,27 +51,40 @@ class AudioDataset(Dataset):
                         wave, sr = torchaudio.load(path, normalization=False)
                         if sr == sampling_rate:
                             audio_length = len(wave[0]) // sr
-                            if audio_min_length < audio_length < audio_max_length:
-                                total_secs += audio_length
-                                self.data.append({'path': path, 'text': text})
+                            data.append({
+                                'path': path,
+                                'text': text,
+                                'audio_length': audio_length})
                 except RuntimeError:
                     continue
-            pd.DataFrame(self.data).to_csv(processed_labels)
-            print('size {}'.format(len(self.data)))
-            print('hrs  {}'.format(total_secs / 3600))
+            pickle.dump(data, open(processed_labels, 'wb'))
+
+        total_secs = 0
+        self.data = []
+        for x in data:
+            if audio_min_length <= x['audio_length'] <= audio_max_length:
+                self.data.append(x)
+                total_secs += x['audio_length']
+        print('Dataset: %s' % desc)
+        print('size   : %d' % len(self.data))
+        print('Time   : %.3f hours' % (total_secs / 3600))
 
         self.transforms = transforms
         self.tokenizer = tokenizer
-        self.vocab_size = self.tokenizer.vocab_size
+
+    def texts(self):
+        return [x['text'] for x in self.data]
 
     def build(self):
+        # return paths, texts, all path in paths is relative to self.root
         raise NotImplementedError()
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        data, sr = torchaudio.load(self.data[idx]['path'], normalization=True)
+        path = os.path.join(self.root, self.data[idx]['path'])
+        data, sr = torchaudio.load(path, normalization=True)
 
         if len(data.shape) > 0:
             data = data[0]  # take left channel?
@@ -82,12 +102,12 @@ class AudioDataset(Dataset):
 
 
 class YoutubeCaption(AudioDataset):
-    def __init__(self, root, labels='english_meta.csv', *args, **kwargs):
+    def __init__(self, root, labels, tokenizer, *args, **kwargs):
         self.labels = labels
-        session = labels
+        session = labels.replace('.csv', '')
         desc = "YoutubeCaption"
         super(YoutubeCaption, self).__init__(
-            root, session, desc, *args, **kwargs)
+            root, tokenizer, session, desc, *args, **kwargs)
 
     def build(self):
         paths = []
@@ -106,11 +126,12 @@ class YoutubeCaption(AudioDataset):
 
 
 class CommonVoice(AudioDataset):
-    def __init__(self, root, labels='train.tsv', *args, **kwargs):
+    def __init__(self, root, labels, tokenizer, *args, **kwargs):
         self.labels = labels
-        session = labels.replace('.tsv', '.csv')
+        session = labels.replace('.tsv', '')
         desc = "CommonVoice"
-        super(CommonVoice, self).__init__(root, session, desc, *args, **kwargs)
+        super(CommonVoice, self).__init__(
+            root, tokenizer, session, desc, *args, **kwargs)
 
     def build(self):
         paths = []
@@ -126,16 +147,17 @@ class CommonVoice(AudioDataset):
 
 
 class Librispeech(AudioDataset):
-    def __init__(self, root, *args, **kwargs):
-        session = 'label.csv'
+    def __init__(self, root, tokenizer, *args, **kwargs):
+        session = 'label'
         desc = "Librispeech"
-        super(Librispeech, self).__init__(root, session, desc, *args, **kwargs)
+        super(Librispeech, self).__init__(
+            root, tokenizer, session, desc, *args, **kwargs)
 
     def build(self):
         paths = []
         texts = []
         trans_files = list(glob.glob(os.path.join(self.root, '*/*/*.txt')))
-        for trans_file in tqdm(trans_files):
+        for trans_file in trans_files:
             with open(trans_file, 'r') as f:
                 dir_path = os.path.dirname(os.path.realpath(trans_file))
                 for line in f.readlines():
@@ -147,11 +169,12 @@ class Librispeech(AudioDataset):
 
 
 class TEDLIUM(AudioDataset):
-    def __init__(self, root, *args, **kwargs):
-        session = 'label.csv'
+    def __init__(self, root, tokenizer, *args, **kwargs):
+        session = 'label'
         desc = "TEDLIUM"
 
-        super(TEDLIUM, self).__init__(root, session, desc, *args, **kwargs)
+        super(TEDLIUM, self).__init__(
+            root, tokenizer, session, desc, *args, **kwargs)
 
     def build(self):
         paths = []
@@ -183,48 +206,12 @@ def seq_collate(results):
     return xs, ys, xlen, ylen
 
 
-class Compose:
-    def __init__(self, transform_list):
-        self.transform_list = transform_list
-
-    def __call__(self, x):
-        for transform in self.transform_list:
-            x = transform(x)
-        return x
-
-
-class LogMelSpectrogram(transforms.MelSpectrogram):
-    """
-    ref: https://github.com/noahchalifour/rnnt-speech-recognition/blob/a0d972f5e407e465ad784c682fa4e72e33d8eefe/utils/preprocessing.py#L48
-    """
-    def forward(self, waveform):
-        mel_specs = super().forward(waveform)
-        log_mel_specs = torch.log(mel_specs + 1e-6)
-        log_mel_specs -= torch.mean(log_mel_specs, dim=0, keepdim=True)
-        return log_mel_specs
-
-
-class DownsampleSpectrogram:
-    def __init__(self, n_frame):
-        self.n_frame = n_frame
-
-    def __call__(self, spec):
-        feat_size, spec_length = spec.shape
-        spec_length = (spec_length // self.n_frame) * self.n_frame
-        spec_sampled = spec[:, :spec_length]
-        spec_sampled = spec_sampled.reshape(feat_size * self.n_frame, -1)
-        return spec_sampled
-
-
 if __name__ == "__main__":
     sr = 16000
-    transform = Compose([
-        LogMelSpectrogram(
-            sample_rate=sr, win_length=int(0.025 * sr),
-            hop_length=int(0.01 * sr), n_fft=512, f_min=125, f_max=7600,
-            n_mels=80),
-        DownsampleSpectrogram(n_frame=3)
-    ])
+    transform = torch.nn.Sequential(
+        transforms.MelSpectrogram(n_fft=768, n_mels=128),
+        mtransforms.Log(),
+        mtransforms.Downsample(n_frame=3))
     # Test
     librispeech = Librispeech(
         '../LibriSpeech/test-clean/', transforms=[transform])
@@ -243,7 +230,7 @@ if __name__ == "__main__":
 
     # Train
     librispeech = Librispeech(
-        '../LibriSpeech/train-clean-100/', transforms=[transform])
+        '../LibriSpeech/train-clean-360/', transforms=[transform])
     tedlium = TEDLIUM(
         '../TEDLIUM_release1/train/', transforms=[transform])
     commonvoice = CommonVoice(

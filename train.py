@@ -1,24 +1,27 @@
 import argparse
 import os
 import textwrap
+import json
 from datetime import datetime
 
 import jiwer
-import numpy as np
 import torch
 import torchaudio.transforms as transforms
+import numpy as np
 from tensorboardX import SummaryWriter
-from tqdm import tqdm
+from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
 from warprnnt_pytorch import RNNTLoss
 
+import transforms as mtransforms
 from models import Transducer
-from tokenizer import NUL
+from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 from dataset import (
-    seq_collate, MergedDataset,
-    CommonVoice,
-    TEDLIUM,
+    seq_collate,
+    MergedDataset,
     Librispeech,
+    # CommonVoice,
+    # TEDLIUM,
     # YoutubeCaption,
 )
 
@@ -26,32 +29,50 @@ from dataset import (
 parser = argparse.ArgumentParser(description='RNN-T')
 parser.add_argument('--name', type=str, default='rnn-t')
 # learning
-parser.add_argument('--lr', type=float, default=4e-4,
+parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
                     help='initial learning rate')
-parser.add_argument('--momentum', type=float, default=0.9,
-                    help='momentum')
+parser.add_argument('--lr', type=float, default=1e-3,
+                    help='initial learning rate')
 parser.add_argument('--epochs', type=int, default=200,
                     help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=1,
+parser.add_argument('--batch_size', type=int, default=2,
                     help='batch size')
-parser.add_argument('--eval_batch_size', type=int, default=64,
+parser.add_argument('--sub_batch_size', type=int, default=2,
+                    help='sub batch size')
+parser.add_argument('--eval_batch_size', type=int, default=2,
                     help='batch size')
 parser.add_argument('--gradclip', default=None, type=float,
                     help='clip norm value')
 # model
-parser.add_argument('--dropout', type=float, default=0.5,
-                    help='dropout applied to layers (0 = no dropout)')
-parser.add_argument('--num_layers', type=int, default=3,
-                    help='number rnn layers')
 parser.add_argument('--vocab_embed_size', type=int, default=16,
                     help='vocab embedding dim')
-parser.add_argument('--hidden_size', type=int, default=128,
+parser.add_argument('--hidden_size', type=int, default=256,
                     help='RNN hidden dimension')
-parser.add_argument('--audio_feat', default=40, type=int,
-                    help='audio feature dimension size')
+parser.add_argument('--enc_num_layers', type=int, default=3,
+                    help='number rnn layers')
+parser.add_argument('--enc_dropout', type=float, default=0.,
+                    help='dropout applied to layers (0 = no dropout)')
+parser.add_argument('--dec_num_layers', type=int, default=1,
+                    help='number rnn layers')
+parser.add_argument('--dec_dropout', type=float, default=0.,
+                    help='dropout applied to layers (0 = no dropout)')
 # data preprocess
-parser.add_argument('--audio_max_length', type=int, default=12,
+parser.add_argument('--audio_max_length', type=int, default=14,
                     help='audio max length')
+parser.add_argument('--audio_feat_size', type=int, default=40,
+                    help='audio feature dimension size')
+parser.add_argument('--n_fft', type=int, default=1024,
+                    help='window size of fft')
+parser.add_argument('--win_length', type=int, default=1024,
+                    help='window length of frame')
+parser.add_argument('--hop_length', type=int, default=512,
+                    help='hop length between frame')
+parser.add_argument('--n_frame', type=int, default=1,
+                    help='downsample audio feature by concatenating')
+parser.add_argument('--tokenizer', default='bpe', choices=['char', 'bpe'],
+                    help='downsample audio feature by concatenating')
+parser.add_argument('--bpe_size', type=int, default=256,
+                    help='BPE vocabulary size')
 # apex
 parser.add_argument('--apex', default=False, action='store_true',
                     help='use mix precision')
@@ -61,8 +82,12 @@ parser.add_argument('--opt_level', default='O1', type=str,
 parser.add_argument('--multi_gpu', action='store_true',
                     help='DataParallel')
 # log
-parser.add_argument('--save_epoch', type=int, default=5,
+parser.add_argument('--save_step', type=int, default=50000,
                     help='frequency to save model')
+parser.add_argument('--eval_step', type=int, default=10000,
+                    help='frequency to save model')
+parser.add_argument('--example_size', type=int, default=20,
+                    help='size of visualized examples')
 device = torch.device('cuda:0')
 
 args = parser.parse_args()
@@ -70,157 +95,193 @@ if args.apex:
     from apex import amp
 
 
-class Trainer():
-    def __init__(self, args):
-        self.args = args
-        transform = transforms.MFCC(
-            n_mfcc=args.audio_feat,
-            melkwargs={'n_fft': 1024, 'win_length': 1024})
+log_pattern = textwrap.dedent(
+    '''
+    `True: %s`
 
-        train_dataset = MergedDataset([
-            CommonVoice(
-                '../common_voice', labels='train.tsv',
-                transforms=[transform],
-                audio_max_length=args.audio_max_length),
+    `Pred: %s`
+    ''')
+
+
+def infloop(dataloader):
+    epoch = 1
+    while True:
+        for batch in dataloader:
+            yield batch, epoch
+        epoch += 1
+
+
+def save(model, optim, sched, epoch):
+    if not os.path.exists(os.path.join(args.logdir, 'models')):
+        os.mkdir(os.path.join(args.logdir, 'models'))
+    if args.multi_gpu:
+        ckpt = {'model': model.module.state_dict()}
+    else:
+        ckpt = {'model': model.state_dict()}
+    ckpt.update({'optim': optim})
+    ckpt.update({'sched': sched})
+    torch.save(
+        ckpt, os.path.join(args.logdir, 'models', 'epoch-%d' % epoch))
+
+
+def evaluate(model, dataloader, loss_fn, example_size):
+    model.eval()
+    tokenizer = dataloader.dataset.tokenizer
+    losses = []
+    pred_seqs = []
+    true_seqs = []
+    wer = []
+    with torch.no_grad():
+        for batch in tqdm(dataloader):
+            xs, ys, xlen, ylen = [x.to(device) for x in batch]
+
+            prob = model(xs, ys)
+            loss = loss_fn(prob, ys.int(), xlen, ylen)
+            losses.append(loss.item())
+
+            xs = xs.to(device)
+            if args.multi_gpu:
+                ys_hat, nll = model.module.greedy_decode(xs, xlen)
+            else:
+                ys_hat, nll = model.greedy_decode(xs, xlen)
+            pred_seq = tokenizer.decode_plus(ys_hat)
+            true_seq = tokenizer.decode_plus(ys)
+            wer.append(jiwer.wer(true_seq, pred_seq))
+            while len(pred_seqs) < example_size:
+                pred_seqs.extend(pred_seq)
+                true_seqs.extend(true_seq)
+    loss = np.mean(losses)
+    wer = np.mean(wer)
+    model.train()
+    return loss, wer, pred_seqs, true_seqs
+
+
+def main():
+    current = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+    args.logdir = os.path.join('logs', '%s-%s' % (args.name, current))
+    writer = SummaryWriter(args.logdir)
+    writer.add_text('args', json.dumps(vars(args), indent=4))
+    print(json.dumps(vars(args)))
+
+    transform = torch.nn.Sequential(
+        transforms.MFCC(
+            n_mfcc=args.audio_feat_size,
+            melkwargs={'n_fft': args.n_fft, 'win_length': args.win_length}),
+        # transforms.MelSpectrogram(
+        #     n_fft=2 ** int(round(np.log2(args.win_length))),
+        #     win_length=args.win_length,
+        #     hop_length=args.hop_length,
+        #     n_mels=args.audio_feat_size),
+        # mtransforms.Log(),
+        # mtransforms.Downsample(n_frame=args.n_frame),
+    )
+
+    if args.tokenizer == 'bpe':
+        tokenizer = HuggingFaceTokenizer(args.bpe_size)
+    else:
+        tokenizer = CharTokenizer()
+    train_dataloader = DataLoader(
+        dataset=MergedDataset([
             Librispeech(
-                '../LibriSpeech/train-clean-360/', transforms=[transform],
-                audio_max_length=args.audio_max_length),
-            TEDLIUM(
-                '../TEDLIUM_release1/train/', transforms=[transform],
-                audio_max_length=args.audio_max_length),
-        ])
-        self.dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=True,
-            num_workers=4, collate_fn=seq_collate)
+                '../LibriSpeech/train-clean-360/',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=args.audio_max_length)]),
+        batch_size=args.batch_size, shuffle=True, num_workers=4,
+        collate_fn=seq_collate, drop_last=True)
 
-        val_dataset = MergedDataset([
-            # CommonVoice(
-            #     '../common_voice', labels='test.tsv',
-            #     transforms=[transform]),
-            # TEDLIUM(
-            #     '../TEDLIUM_release1/test/', transforms=[transform]),
+    val_dataloader = DataLoader(
+        dataset=MergedDataset([
             Librispeech(
-                '../LibriSpeech/test-clean/', transforms=[transform]),
-        ])
-        self.val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False,
-            num_workers=4, collate_fn=seq_collate)
+                '../LibriSpeech/test-clean/',
+                tokenizer=tokenizer,
+                transforms=transform)]),
+        batch_size=args.eval_batch_size, shuffle=False, num_workers=4,
+        collate_fn=seq_collate)
 
-        self.tokenizer = val_dataset.tokenizer
-        self.model = Transducer(
-            args.audio_feat, train_dataset.vocab_size,
-            args.vocab_embed_size, args.hidden_size, args.num_layers,
-            args.dropout).to(device)
-        if args.multi_gpu:
-            self.model = torch.nn.DataParallel(self.model)
-        self.optim = torch.optim.Adam(
-            self.model.parameters(), lr=args.lr)
-        # self.sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #     self.optim, mode='min', factor=0.5, patience=10, verbose=1,
-        #     min_lr=1e-6)
-        self.loss_fn = RNNTLoss(blank=NUL)
+    tokenizer.build(train_dataloader.dataset.texts())
 
-        if args.apex:
-            self.model, self.optim = amp.initialize(
-                self.model, self.optim, opt_level=args.opt_level)
+    model = Transducer(
+        vocab_size=train_dataloader.dataset.tokenizer.vocab_size,
+        vocab_embed_size=args.vocab_embed_size,
+        hidden_size=args.hidden_size,
+        audio_feat_size=args.audio_feat_size * args.n_frame,
+        enc_num_layers=args.enc_num_layers,
+        enc_dropout=args.enc_dropout,
+        dec_num_layers=args.dec_num_layers,
+        dec_dropout=args.dec_dropout).to(device)
+    if args.optim == 'adam':
+        optim = torch.optim.Adam(model.parameters(), lr=args.lr)
+    else:
+        optim = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    sched = None
+    loss_fn = RNNTLoss(blank=NUL)
 
-        current = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-        self.logdir = os.path.join('logs', '%s-%s' % (self.args.name, current))
-        self.writer = SummaryWriter(self.logdir)
-        self.log_pattern = textwrap.dedent(
-            '''
-            `True: %s`
+    if args.apex:
+        model, optim = amp.initialize(
+            model, optim, opt_level=args.opt_level)
+    if args.multi_gpu:
+        model = torch.nn.DataParallel(model)
 
-            `Pred: %s`
-            ''')
+    losses = []
+    looper = infloop(train_dataloader)
+    total_steps = len(train_dataloader) * args.epochs
+    with trange(total_steps, dynamic_ncols=True) as pbar:
+        for step in pbar:
+            batch, epoch = next(looper)
+            batch = [x.to(device) for x in batch]
 
-    def save(self, epoch):
-        if not os.path.exists(os.path.join(self.logdir, 'models')):
-            os.mkdir(os.path.join(self.logdir, 'models'))
-        if self.args.multi_gpu:
-            ckpt = {'model': self.model.module.state_dict()}
-        else:
-            ckpt = {'model': self.model.state_dict()}
-        ckpt.update({'optim': self.optim})
-        torch.save(
-            ckpt, os.path.join(self.logdir, 'models', 'epoch-%d' % epoch))
+            start_idxs = range(0, args.batch_size, args.sub_batch_size)
+            sub_losses = []
+            optim.zero_grad()
+            for start_idx in start_idxs:
+                sub_slice = slice(start_idx, start_idx + args.sub_batch_size)
+                xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
+                xs = xs[:, :xlen.max()]
+                ys = ys[:, :ylen.max()]
+                prob = model(xs, ys)
+                loss = loss_fn(prob, ys.int(), xlen, ylen) / len(start_idxs)
+                if args.apex:
+                    with amp.scale_loss(loss, optim) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
+                sub_losses.append(loss.detach())
 
-    def evaluate(self, epoch, write_size=100):
-        self.model.eval()
-        write_count = 0
-        wers = []
-        losses = []
-        with torch.no_grad():
-            with tqdm(self.val_dataloader, dynamic_ncols=True) as pbar:
-                pbar.set_description('evaluate')
-                for batch in pbar:
-                    xs, ys, xlen, ylen = [x.to(device) for x in batch]
+            if args.gradclip:
+                if args.apex:
+                    torch.nn.utils.clip_grad_norm_(
+                        amp.master_params(optim), args.gradclip)
+                else:
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), args.gradclip)
+            optim.step()
 
-                    prob = self.model(xs, ys)
-                    loss = self.loss_fn(prob, ys.int(), xlen, ylen)
-                    losses.append(loss)
+            loss = torch.stack(sub_losses).sum()
+            losses.append(loss)
+            pbar.set_description('Epoch %d, loss: %.4f' % (epoch, loss))
 
-                    xs = xs.to(device)
-                    if args.multi_gpu:
-                        ys_hat, nll = self.model.module.greedy_decode(xs, xlen)
-                    else:
-                        ys_hat, nll = self.model.greedy_decode(xs, xlen)
-                    for seq, seq_gt in zip(ys_hat, ys.cpu()):
-                        pred_seq = self.tokenizer.decode(seq)
-                        true_seq = self.tokenizer.decode(seq_gt.numpy())
-                        measures = jiwer.compute_measures(true_seq, pred_seq)
-                        wers.append(measures['wer'])
-                        if write_count < write_size:
-                            self.writer.add_text(
-                                "visualize/%d" % write_count,
-                                self.log_pattern % (true_seq, pred_seq),
-                                epoch)
-                            write_count += 1
-        self.model.train()
-        wer_mean, wer_std = np.mean(wers), np.std(wers)
-        loss = torch.stack(losses).mean()
-        self.writer.add_scalar('WER', wer_mean, epoch)
-        self.writer.add_scalar('WER_STD', wer_std, epoch)
-        self.writer.add_scalar('val_loss', loss)
-        print('WER: %.5f(%.5f)' % (wer_mean, wer_std))
-        return loss
+            if step > 0 and step % 5 == 0:
+                train_loss = torch.stack(losses).mean()
+                writer.add_scalar('train_loss', train_loss, step)
+                losses = []
 
-    def train(self):
-        self.evaluate(epoch=0)
-        self.save(epoch=0)
+            if step > 0 and step % args.save_step == 0:
+                save(model, optim, sched, step)
 
-        for epoch in range(1, self.args.epochs + 1):
-            print(f'[epoch: {epoch}]')
-            losses = []
-            with tqdm(total=len(self.dataloader), dynamic_ncols=True) as pbar:
-                for batch in self.dataloader:
-                    xs, ys, xlen, ylen = [x.to(device) for x in batch]
-                    prob = self.model(xs, ys)
-                    loss = self.loss_fn(prob, ys.int(), xlen, ylen)
-                    self.optim.zero_grad()
-                    if self.args.apex:
-                        with amp.scale_loss(loss, self.optim) as scaled_loss:
-                            scaled_loss.backward()
-                    else:
-                        loss.backward()
-                    if self.args.gradclip:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.args.gradclip)
-                    self.optim.step()
-                    losses.append(loss.item())
-
-                    pbar.update(1)
-                    pbar.set_description('loss: %.4f' % (loss.item()))
-            loss = np.mean(losses)
-            self.writer.add_scalar('loss', loss, epoch)
-
-            val_loss = self.evaluate(epoch)
-            # self.sched.step(val_loss)
-
-            if epoch % self.args.save_epoch == 0:
-                self.save(epoch)
+            if step >= 0 and step % args.eval_step == 0:
+                pbar.set_description('Evaluating ...')
+                val_loss, wer, pred_seqs, true_seqs = evaluate(
+                    model, val_dataloader, loss_fn, args.example_size)
+                writer.add_scalar('WER', wer, step)
+                writer.add_scalar('val_loss', val_loss, step)
+                for i in range(args.example_size):
+                    log = log_pattern % (true_seqs[i], pred_seqs[i])
+                    writer.add_text('val/%d' % i, log, step)
+                pbar.write(
+                    'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
+                        epoch, step, val_loss, wer))
 
 
 if __name__ == "__main__":
-    trainer = Trainer(args)
-    trainer.train()
+    main()
