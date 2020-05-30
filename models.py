@@ -227,12 +227,7 @@ class Transducer(nn.Module):
             c[:, pred != self.blank, :] = new_c[:, pred != self.blank, :]
         y_seq = torch.stack(y_seq, dim=1)
         log_p = torch.stack(log_p, dim=1).sum(dim=1)
-        ret_y = []
-        # truncat to xlen and remove blank token
-        for seq, seq_len in zip(y_seq, xlen):
-            seq = seq.cpu().numpy()[:seq_len]
-            ret_y.append(list(filter(lambda tok: tok != self.blank, seq)))
-        return ret_y, -log_p
+        return y_seq, -log_p
 
 #     def beam_search(self, xs, W=10, prefix=False,
 #                     bos_idx=DEFAULT_TOKEN2ID['<bos>']):

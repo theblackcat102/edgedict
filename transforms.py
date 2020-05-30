@@ -1,6 +1,12 @@
 import torch
 
 
+class FreqNormalize(torch.nn.Module):
+    def forward(self, mel_spec):
+        mel_spec = mel_spec - mel_spec.mean(dim=-1, keepdim=True)
+        return mel_spec
+
+
 class Log(torch.nn.Module):
     """
     ref: https://github.com/noahchalifour/rnnt-speech-recognition/blob/a0d972f5e407e465ad784c682fa4e72e33d8eefe/utils/preprocessing.py#L48

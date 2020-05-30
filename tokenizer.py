@@ -48,7 +48,7 @@ def end_pad_concat(texts):
     return labels
 
 
-class CharTokenizer():
+class CharTokenizer:
     def __init__(self):
         valid_tokens = string.ascii_lowercase + string.punctuation + ' '
 
@@ -67,12 +67,12 @@ class CharTokenizer():
         text = str(text).lower()
         text = text[:max_length]
         text = [self.token2id.get(char, UNK) for char in text]
-        return text
+        return [BOS] + text + [EOS]
 
     def decode(self, tokens):
-        text = ''.join([self.id2token.get(token, '') for token in tokens])
-        text = text.replace('<pad>', '')
-        text = text.replace('<eos>', '')
+        text = ''.join([self.id2token[token] for token in tokens])
+        for token in DEFAULT_TOKEN2ID.keys():
+            text = text.replace(token, '')
         return text
 
     def decode_plus(self, token_batch):
@@ -85,32 +85,32 @@ class CharTokenizer():
         pass
 
 
-# class CharTokenizer():
-#     def build(self, texts):
-#         self.token2id = dict(DEFAULT_TOKEN2ID)
-#         for char in set(''.join(texts).lower()):
-#             idx = len(self.token2id)
-#             self.token2id[char] = idx
-#         self.id2token = {v: k for k, v in self.token2id.items()}
-#         self.vocab_size = len(self.token2id)
+class CharTokenizerV2:
+    def build(self, texts):
+        self.token2id = dict(DEFAULT_TOKEN2ID)
+        for char in set(''.join(texts).lower()):
+            idx = len(self.token2id)
+            self.token2id[char] = idx
+        self.id2token = {v: k for k, v in self.token2id.items()}
+        self.vocab_size = len(self.token2id)
 
-#     def encode(self, text, max_length=None):
-#         text = str(text).lower()
-#         text = [self.token2id.get(char, UNK) for char in text] + [EOS]
-#         text = text[:max_length]
-#         return text
+    def encode(self, text, max_length=None):
+        text = str(text).lower()
+        text = text[:max_length]
+        text = [self.token2id.get(char, UNK) for char in text]
+        return [BOS] + text + [EOS]
 
-#     def decode(self, tokens):
-#         text = ''.join([self.id2token.get(token, '') for token in tokens])
-#         text = text.replace('<pad>', '')
-#         text = text.replace('<eos>', '')
-#         return text
+    def decode(self, tokens):
+        text = ''.join([self.id2token[token] for token in tokens])
+        for token in DEFAULT_TOKEN2ID.keys():
+            text = text.replace(token, '')
+        return text
 
-#     def decode_plus(self, token_batch):
-#         sentences = []
-#         for tokens in token_batch:
-#             sentences.append(self.decode(tokens))
-#         return sentences
+    def decode_plus(self, token_batch):
+        sentences = []
+        for tokens in token_batch:
+            sentences.append(self.decode(tokens))
+        return sentences
 
 
 class HuggingFaceTokenizer:

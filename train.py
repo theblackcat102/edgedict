@@ -144,12 +144,12 @@ def evaluate(model, dataloader, loss_fn, example_size):
                 ys_hat, nll = model.module.greedy_decode(xs, xlen)
             else:
                 ys_hat, nll = model.greedy_decode(xs, xlen)
-            pred_seq = tokenizer.decode_plus(ys_hat)
-            true_seq = tokenizer.decode_plus(ys)
+            pred_seq = tokenizer.decode_plus(ys_hat.cpu().numpy())
+            true_seq = tokenizer.decode_plus(ys.cpu().numpy())
             wer.append(jiwer.wer(true_seq, pred_seq))
-            while len(pred_seqs) < example_size:
-                pred_seqs.extend(pred_seq)
-                true_seqs.extend(true_seq)
+            if len(pred_seqs) < example_size:
+                pred_seqs.extend(pred_seq[:example_size - len(pred_seqs)])
+                true_seqs.extend(true_seq[:example_size - len(true_seqs)])
     loss = np.mean(losses)
     wer = np.mean(wer)
     model.train()
@@ -172,6 +172,7 @@ def main():
         #     win_length=args.win_length,
         #     hop_length=args.hop_length,
         #     n_mels=args.audio_feat_size),
+        # mtransforms.FreqNormalize(),
         # mtransforms.Log(),
         # mtransforms.Downsample(n_frame=args.n_frame),
     )
