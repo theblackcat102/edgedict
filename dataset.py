@@ -33,7 +33,7 @@ class MergedDataset(ConcatDataset):
 class AudioDataset(Dataset):
     def __init__(self, root, tokenizer, session='', desc='AudioDataset',
                  audio_max_length=99, audio_min_length=1, sampling_rate=16000,
-                 transforms=None):
+                 transforms=None, reverse_sorted_by_length=False):
         self.root = root
         processed_labels = os.path.join(
             root, 'preprocessed_v3_%s.pkl' % session)
@@ -69,6 +69,9 @@ class AudioDataset(Dataset):
         print('size   : %d' % len(self.data))
         print('Time   : %.3f hours' % (total_secs / 3600))
 
+        self.data = sorted(
+            self.data, key=lambda x: x['audio_length'], reverse=True)
+
         self.transforms = transforms
         self.tokenizer = tokenizer
 
@@ -86,14 +89,11 @@ class AudioDataset(Dataset):
         path = os.path.join(self.root, self.data[idx]['path'])
         data, sr = torchaudio.load(path, normalization=True)
 
-        if len(data.shape) > 0:
-            data = data[0]  # take left channel?
-
         if isinstance(self.transforms, list):
             for trans in self.transforms:
-                data = trans(data)
+                data = trans(data[0])
         else:
-            data = self.transforms(data)
+            data = self.transforms(data[0])
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
@@ -200,48 +200,39 @@ def seq_collate(results):
         ylen.append(len(tokens))
 
     xs = zero_pad_concat(xs)
-    ys = end_pad_concat(ys)
+    ys = end_pad_concat(ys).int()
     xlen = torch.from_numpy(np.array(xlen)).int()
     ylen = torch.from_numpy(np.array(ylen)).int()
     return xs, ys, xlen, ylen
 
 
 if __name__ == "__main__":
-    sr = 16000
-    transform = torch.nn.Sequential(
-        transforms.MelSpectrogram(n_fft=768, n_mels=128),
-        mtransforms.Log(),
-        mtransforms.Downsample(n_frame=3))
-    # Test
-    librispeech = Librispeech(
-        '../LibriSpeech/test-clean/', transforms=[transform])
-    tedlium = TEDLIUM(
-        '../TEDLIUM_release1/test/', transforms=[transform])
-    commonvoice = CommonVoice(
-        '../common_voice', labels='test.tsv', transforms=[transform])
-    dataset = MergedDataset([librispeech, tedlium, commonvoice])
-    dataloader = DataLoader(
-        dataset, collate_fn=seq_collate, batch_size=8, num_workers=4,
-        shuffle=True)
-    for i, (xs, ys, xlen, ylen) in enumerate(dataloader):
-        print(xs.shape)
-        if i == 3:
-            break
+    from tokenizer import CharTokenizer
+    transform = mtransforms.DLHLP()
+    tokenizer = CharTokenizer(cache_dir='/tmp')
+    train_dataloader = DataLoader(
+        dataset=MergedDataset([
+            Librispeech(
+                '../LibriSpeech/train-clean-360/',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14)]),
+        batch_size=4, shuffle=True, num_workers=4,
+        collate_fn=seq_collate, drop_last=True)
 
-    # Train
-    librispeech = Librispeech(
-        '../LibriSpeech/train-clean-360/', transforms=[transform])
-    tedlium = TEDLIUM(
-        '../TEDLIUM_release1/train/', transforms=[transform])
-    commonvoice = CommonVoice(
-        '../common_voice', labels='train.tsv', transforms=[transform])
-    # youtubecaption = YoutubeCaption(
-    #     '../youtube-speech-text/', transforms=[transform])
-    dataset = MergedDataset([librispeech, tedlium, commonvoice])
-    dataloader = DataLoader(
-        dataset, collate_fn=seq_collate, batch_size=8, num_workers=4,
-        shuffle=True)
-    for i, (xs, ys, xlen, ylen) in enumerate(dataloader):
-        print(xs.shape)
-        if i == 3:
-            break
+    val_dataloader = DataLoader(
+        dataset=MergedDataset([
+            Librispeech(
+                '../LibriSpeech/test-clean/',
+                tokenizer=tokenizer,
+                transforms=transform)]),
+        batch_size=4, shuffle=False, num_workers=4,
+        collate_fn=seq_collate)
+
+    tokenizer.build(train_dataloader.dataset.texts())
+
+    xs, ys, xlen, ylen = next(iter(train_dataloader))
+    print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+
+    xs, ys, xlen, ylen = next(iter(val_dataloader))
+    print(xs.shape, ys.shape, xlen.shape, ylen.shape)

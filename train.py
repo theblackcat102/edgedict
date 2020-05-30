@@ -31,15 +31,15 @@ parser.add_argument('--name', type=str, default='rnn-t')
 # learning
 parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
                     help='initial learning rate')
-parser.add_argument('--lr', type=float, default=1e-3,
+parser.add_argument('--lr', type=float, default=5e-4,
                     help='initial learning rate')
 parser.add_argument('--epochs', type=int, default=200,
                     help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=2,
+parser.add_argument('--batch_size', type=int, default=8,
                     help='batch size')
-parser.add_argument('--sub_batch_size', type=int, default=2,
+parser.add_argument('--sub_batch_size', type=int, default=8,
                     help='sub batch size')
-parser.add_argument('--eval_batch_size', type=int, default=2,
+parser.add_argument('--eval_batch_size', type=int, default=8,
                     help='batch size')
 parser.add_argument('--gradclip', default=None, type=float,
                     help='clip norm value')
@@ -69,7 +69,7 @@ parser.add_argument('--hop_length', type=int, default=512,
                     help='hop length between frame')
 parser.add_argument('--n_frame', type=int, default=1,
                     help='downsample audio feature by concatenating')
-parser.add_argument('--tokenizer', default='bpe', choices=['char', 'bpe'],
+parser.add_argument('--tokenizer', default='char', choices=['char', 'bpe'],
                     help='downsample audio feature by concatenating')
 parser.add_argument('--bpe_size', type=int, default=256,
                     help='BPE vocabulary size')
@@ -131,12 +131,12 @@ def evaluate(model, dataloader, loss_fn, example_size):
     pred_seqs = []
     true_seqs = []
     wer = []
-    with torch.no_grad():
-        for batch in tqdm(dataloader):
+    with torch.no_grad(), tqdm(dataloader, dynamic_ncols=True) as pbar:
+        for batch in pbar:
             xs, ys, xlen, ylen = [x.to(device) for x in batch]
 
             prob = model(xs, ys)
-            loss = loss_fn(prob, ys.int(), xlen, ylen)
+            loss = loss_fn(prob, ys, xlen, ylen)
             losses.append(loss.item())
 
             xs = xs.to(device)
@@ -147,6 +147,7 @@ def evaluate(model, dataloader, loss_fn, example_size):
             pred_seq = tokenizer.decode_plus(ys_hat.cpu().numpy())
             true_seq = tokenizer.decode_plus(ys.cpu().numpy())
             wer.append(jiwer.wer(true_seq, pred_seq))
+            pbar.set_description('wer: %.4f' % wer[-1])
             if len(pred_seqs) < example_size:
                 pred_seqs.extend(pred_seq[:example_size - len(pred_seqs)])
                 true_seqs.extend(true_seq[:example_size - len(true_seqs)])
@@ -167,20 +168,13 @@ def main():
         transforms.MFCC(
             n_mfcc=args.audio_feat_size,
             melkwargs={'n_fft': args.n_fft, 'win_length': args.win_length}),
-        # transforms.MelSpectrogram(
-        #     n_fft=2 ** int(round(np.log2(args.win_length))),
-        #     win_length=args.win_length,
-        #     hop_length=args.hop_length,
-        #     n_mels=args.audio_feat_size),
-        # mtransforms.FreqNormalize(),
-        # mtransforms.Log(),
-        # mtransforms.Downsample(n_frame=args.n_frame),
     )
 
     if args.tokenizer == 'bpe':
-        tokenizer = HuggingFaceTokenizer(args.bpe_size)
+        tokenizer = HuggingFaceTokenizer(
+            cache_dir=args.logdir, vocab_size=args.bpe_size)
     else:
-        tokenizer = CharTokenizer()
+        tokenizer = CharTokenizer(cache_dir=args.logdir)
     train_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
@@ -235,15 +229,19 @@ def main():
             start_idxs = range(0, args.batch_size, args.sub_batch_size)
             sub_losses = []
             optim.zero_grad()
-            for start_idx in start_idxs:
+            for sub_batch_idx, start_idx in enumerate(start_idxs):
                 sub_slice = slice(start_idx, start_idx + args.sub_batch_size)
                 xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
                 xs = xs[:, :xlen.max()]
-                ys = ys[:, :ylen.max()]
+                ys = ys[:, :ylen.max()].contiguous()
                 prob = model(xs, ys)
-                loss = loss_fn(prob, ys.int(), xlen, ylen) / len(start_idxs)
+                loss = loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
                 if args.apex:
-                    with amp.scale_loss(loss, optim) as scaled_loss:
+                    delay_unscale = sub_batch_idx < len(start_idxs) - 1
+                    with amp.scale_loss(
+                            loss,
+                            optim,
+                            delay_unscale=delay_unscale) as scaled_loss:
                         scaled_loss.backward()
                 else:
                     loss.backward()

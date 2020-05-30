@@ -42,7 +42,7 @@ class LayerNormRNN(nn.Module):
             else:
                 proj = []
             if proj_size is not None:
-                proj.append([nn.Linear(hidden_size, proj_size)])
+                proj.append(nn.Linear(hidden_size, proj_size))
                 output_size = proj_size
             else:
                 output_size = hidden_size
@@ -71,12 +71,12 @@ class Transducerv2(nn.Module):
                  vocab_size,
                  vocab_embed_size,
                  audio_feat_size,
-                 hidden_size=2048,
-                 enc_num_layers=8,
+                 hidden_size=256,
+                 enc_num_layers=3,
                  enc_dropout=0,
-                 dec_num_layers=2,
+                 dec_num_layers=1,
                  dec_dropout=0,
-                 proj_size=640,
+                 proj_size=None,
                  blank=NUL):
         super(Transducerv2, self).__init__()
         self.blank = blank
@@ -87,8 +87,7 @@ class Transducerv2(nn.Module):
             num_layers=enc_num_layers,
             dropout=enc_dropout,
             proj_size=proj_size,
-            time_reductions=[1],
-            RNN=nn.LSTM)
+            time_reductions=[1])
         # Decoder
         self.embed = nn.Embedding(
             vocab_size, vocab_embed_size, padding_idx=PAD)
@@ -98,8 +97,7 @@ class Transducerv2(nn.Module):
             num_layers=dec_num_layers,
             dropout=dec_dropout,
             proj_size=proj_size,
-            time_reductions=None,
-            RNN=nn.LSTM)
+            time_reductions=None)
         # Joint
         self.joint = nn.Sequential(
             nn.Linear(hidden_size, proj_size),
@@ -112,7 +110,7 @@ class Transducerv2(nn.Module):
         h_enc, _ = self.encoder(xs)
         # decoder
         bos = ys.new_ones((ys.shape[0], 1)).long() * BOS
-        h_pre = torch.cat([bos, ys], dim=-1)
+        h_pre = torch.cat([bos, ys.long()], dim=-1)
         h_pre, _ = self.decoder(self.embed(h_pre))
         # expand
         h_enc = h_enc.unsqueeze(dim=2)
@@ -193,7 +191,7 @@ class Transducer(nn.Module):
         # decoder
         self.decoder.flatten_parameters()
         bos = ys.new_ones((ys.shape[0], 1)).long() * BOS
-        h_pre = torch.cat([bos, ys], dim=-1)
+        h_pre = torch.cat([bos, ys.long()], dim=-1)
         h_pre, _ = self.decoder(self.embed(h_pre))
         # expand
         h_enc = h_enc.unsqueeze(dim=2)
@@ -227,6 +225,9 @@ class Transducer(nn.Module):
             c[:, pred != self.blank, :] = new_c[:, pred != self.blank, :]
         y_seq = torch.stack(y_seq, dim=1)
         log_p = torch.stack(log_p, dim=1).sum(dim=1)
+        y_seq_truncated = []
+        for seq, seq_len in zip(y_seq, xlen):
+            y_seq_truncated.append(seq[:seq_len].cpu().numpy())
         return y_seq, -log_p
 
 #     def beam_search(self, xs, W=10, prefix=False,
@@ -346,10 +347,17 @@ class Transducer(nn.Module):
 
 
 if __name__ == "__main__":
-    model = Transducer(128, 3600, 8, 64, 2).cuda()
-    x = torch.randn((32, 128, 128)).float().cuda()
-    y = torch.randint(0, 3500, (32, 10)).long().cuda()
-    xlen = torch.from_numpy(np.array([128]*32)).int()
-    ylen = torch.from_numpy(np.array([10]*32)).int()
-    loss = model(x, y, xlen, ylen)
-    print(loss)
+    from warprnnt_pytorch import RNNTLoss
+    model = Transducerv2(
+        vocab_size=34,
+        vocab_embed_size=16,
+        audio_feat_size=40,
+        proj_size=256)
+    loss_fn = RNNTLoss(blank=0)
+    xs = torch.randn((2, 200, 40)).float()
+    ys = torch.randint(0, 20, (2, 32)).int()
+    xlen = torch.ones(2).int() * 200
+    ylen = torch.ones(2).int() * 32
+    prob = model(xs, ys)
+    loss = loss_fn(prob, ys, xlen, ylen)
+    print(prob.shape)

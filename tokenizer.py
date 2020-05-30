@@ -1,6 +1,6 @@
 import os
-import string
 import tempfile
+import pickle
 
 import torch
 from tokenizers import CharBPETokenizer
@@ -49,50 +49,29 @@ def end_pad_concat(texts):
 
 
 class CharTokenizer:
-    def __init__(self):
-        valid_tokens = string.ascii_lowercase + string.punctuation + ' '
+    def __init__(self, cache_dir, max_length=None):
+        self.cache_dir = cache_dir
 
-        self.token2id = dict(DEFAULT_TOKEN2ID)
-
-        self.id2token = {}
-        for idx, token in enumerate(valid_tokens):
-            self.token2id[token] = idx + 4
-
+    def load(self):
+        self.token2id = pickle.load(
+            open(os.path.join(self.cache_dir, "token2id.pkl"), "rb"))
+        self.id2token = [None for _ in range(len(self.token2id))]
         for token, idx in self.token2id.items():
             self.id2token[idx] = token
+        self.vocab_size = len(self.token2id)
 
-        self.vocab_size = len(self.id2token)
-
-    def encode(self, text, max_length=None):
-        text = str(text).lower()
-        text = text[:max_length]
-        text = [self.token2id.get(char, UNK) for char in text]
-        return [BOS] + text + [EOS]
-
-    def decode(self, tokens):
-        text = ''.join([self.id2token[token] for token in tokens])
-        for token in DEFAULT_TOKEN2ID.keys():
-            text = text.replace(token, '')
-        return text
-
-    def decode_plus(self, token_batch):
-        sentences = []
-        for tokens in token_batch:
-            sentences.append(self.decode(tokens))
-        return sentences
-
-    def build(self, texts):
-        pass
-
-
-class CharTokenizerV2:
     def build(self, texts):
         self.token2id = dict(DEFAULT_TOKEN2ID)
-        for char in set(''.join(texts).lower()):
+        chars = sorted(list(set(''.join(texts).lower())))
+        for char in chars:
             idx = len(self.token2id)
             self.token2id[char] = idx
-        self.id2token = {v: k for k, v in self.token2id.items()}
+        self.id2token = [None for _ in range(len(self.token2id))]
+        for token, idx in self.token2id.items():
+            self.id2token[idx] = token
         self.vocab_size = len(self.token2id)
+        pickle.dump(self.token2id,
+                    open(os.path.join(self.cache_dir, "token2id.pkl"), "wb"))
 
     def encode(self, text, max_length=None):
         text = str(text).lower()
@@ -114,23 +93,14 @@ class CharTokenizerV2:
 
 
 class HuggingFaceTokenizer:
-    def __init__(self, vocab_size, min_frequency=2, max_length=None,
-                 cache_dir='./BPE'):
+    def __init__(self, cache_dir, max_length=None, vocab_size=400):
         self.vocab_size = vocab_size
-        self.min_frequency = min_frequency
         self.max_length = max_length
         self.cache_dir = cache_dir
-        self.name = "%d-%d-%s" % (vocab_size, min_frequency, max_length)
+        self.name = "%d-%s" % (vocab_size, max_length)
         self.tokenizer = None
 
-    def build(self, texts=None):
-        vocab_path = os.path.join(self.cache_dir, self.name, '-vocab.json')
-        merge_path = os.path.join(self.cache_dir, self.name, '-merges.txt')
-        if os.path.exists(vocab_path) and os.path.join(merge_path):
-            self.tokenizer = CharBPETokenizer(vocab_path, merge_path)
-        elif texts is None:
-            raise ValueError('Need texts for training CharBPETokenizer')
-
+    def build(self, texts):
         tmp_file = tempfile.NamedTemporaryFile()
 
         with open(tmp_file.name, "w") as f:
@@ -140,7 +110,6 @@ class HuggingFaceTokenizer:
         self.tokenizer.train(
             [tmp_file.name],
             vocab_size=self.vocab_size,
-            min_frequency=self.min_frequency,
             special_tokens=[
                 NUL_token,
                 PAD_token,
