@@ -42,7 +42,7 @@ def end_pad_concat(texts):
     max_t = max(len(text) for text in texts)
     shape = (len(texts), max_t)
 
-    labels = torch.full(shape, fill_value=PAD).long()
+    labels = torch.full(shape, fill_value=PAD, dtype=torch.long)
     for e, l in enumerate(texts):
         labels[e, :len(l)] = l
     return labels

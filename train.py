@@ -28,6 +28,8 @@ from dataset import (
 
 parser = argparse.ArgumentParser(description='RNN-T')
 parser.add_argument('--name', type=str, default='rnn-t')
+parser.add_argument('--eval_model', type=str, default=None,
+                    help='only evaluate model')
 # learning
 parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
                     help='initial learning rate')
@@ -48,11 +50,11 @@ parser.add_argument('--vocab_embed_size', type=int, default=16,
                     help='vocab embedding dim')
 parser.add_argument('--hidden_size', type=int, default=256,
                     help='RNN hidden dimension')
-parser.add_argument('--enc_num_layers', type=int, default=3,
+parser.add_argument('--enc_num_layers', type=int, default=4,
                     help='number rnn layers')
 parser.add_argument('--enc_dropout', type=float, default=0.,
                     help='dropout applied to layers (0 = no dropout)')
-parser.add_argument('--dec_num_layers', type=int, default=1,
+parser.add_argument('--dec_num_layers', type=int, default=2,
                     help='number rnn layers')
 parser.add_argument('--dec_dropout', type=float, default=0.,
                     help='dropout applied to layers (0 = no dropout)')
@@ -67,10 +69,10 @@ parser.add_argument('--win_length', type=int, default=1024,
                     help='window length of frame')
 parser.add_argument('--hop_length', type=int, default=512,
                     help='hop length between frame')
-parser.add_argument('--n_frame', type=int, default=1,
+parser.add_argument('--sample_frame', type=int, default=1,
                     help='downsample audio feature by concatenating')
 parser.add_argument('--tokenizer', default='char', choices=['char', 'bpe'],
-                    help='downsample audio feature by concatenating')
+                    help='tokenizer')
 parser.add_argument('--bpe_size', type=int, default=256,
                     help='BPE vocabulary size')
 # apex
@@ -144,7 +146,7 @@ def evaluate(model, dataloader, loss_fn, example_size):
                 ys_hat, nll = model.module.greedy_decode(xs, xlen)
             else:
                 ys_hat, nll = model.greedy_decode(xs, xlen)
-            pred_seq = tokenizer.decode_plus(ys_hat.cpu().numpy())
+            pred_seq = tokenizer.decode_plus(ys_hat)
             true_seq = tokenizer.decode_plus(ys.cpu().numpy())
             wer.append(jiwer.wer(true_seq, pred_seq))
             pbar.set_description('wer: %.4f' % wer[-1])
@@ -167,14 +169,29 @@ def main():
     transform = torch.nn.Sequential(
         transforms.MFCC(
             n_mfcc=args.audio_feat_size,
-            melkwargs={'n_fft': args.n_fft, 'win_length': args.win_length}),
+            melkwargs={
+                'n_fft': args.n_fft,
+                'win_length': args.win_length,
+                'hop_length': args.hop_length}),
+        # mtransforms.Transpose(),
+        # mtransforms.CatDeltas(),
+        # mtransforms.CMVN(),
+        # mtransforms.Downsample(args.sample_frame),
     )
+
+    # transform = torch.nn.Sequential(
+    #     mtransforms.KaldiMFCC(num_ceps=args.audio_feat_size),
+    #     mtransforms.CatDeltas(),
+    #     mtransforms.CMVN(),
+    #     mtransforms.Downsample(args.sample_frame)
+    # )
 
     if args.tokenizer == 'bpe':
         tokenizer = HuggingFaceTokenizer(
             cache_dir=args.logdir, vocab_size=args.bpe_size)
     else:
         tokenizer = CharTokenizer(cache_dir=args.logdir)
+
     train_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
@@ -199,25 +216,30 @@ def main():
     model = Transducer(
         vocab_size=train_dataloader.dataset.tokenizer.vocab_size,
         vocab_embed_size=args.vocab_embed_size,
+        audio_feat_size=args.audio_feat_size * args.sample_frame,
         hidden_size=args.hidden_size,
-        audio_feat_size=args.audio_feat_size * args.n_frame,
         enc_num_layers=args.enc_num_layers,
         enc_dropout=args.enc_dropout,
         dec_num_layers=args.dec_num_layers,
-        dec_dropout=args.dec_dropout).to(device)
+        dec_dropout=args.dec_dropout,
+        proj_size=args.hidden_size,
+    ).to(device)
     if args.optim == 'adam':
         optim = torch.optim.Adam(model.parameters(), lr=args.lr)
     else:
         optim = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
     sched = None
     loss_fn = RNNTLoss(blank=NUL)
-
     if args.apex:
-        model, optim = amp.initialize(
-            model, optim, opt_level=args.opt_level)
+        model, optim = amp.initialize(model, optim, opt_level=args.opt_level)
     if args.multi_gpu:
         model = torch.nn.DataParallel(model)
-
+    if args.eval_model:
+        model.load_state_dict(torch.load(args.eval_model)['model'])
+        val_loss, wer, _, _ = evaluate(
+            model, val_dataloader, loss_fn, args.example_size)
+        print('Evaluate, loss: %.4f, WER: %.4f' % (val_loss, wer))
+        exit(0)
     losses = []
     looper = infloop(train_dataloader)
     total_steps = len(train_dataloader) * args.epochs
@@ -268,7 +290,7 @@ def main():
             if step > 0 and step % args.save_step == 0:
                 save(model, optim, sched, step)
 
-            if step >= 0 and step % args.eval_step == 0:
+            if step > 0 and step % args.eval_step == 0:
                 pbar.set_description('Evaluating ...')
                 val_loss, wer, pred_seqs, true_seqs = evaluate(
                     model, val_dataloader, loss_fn, args.example_size)

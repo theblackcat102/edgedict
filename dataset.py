@@ -69,8 +69,9 @@ class AudioDataset(Dataset):
         print('size   : %d' % len(self.data))
         print('Time   : %.3f hours' % (total_secs / 3600))
 
-        self.data = sorted(
-            self.data, key=lambda x: x['audio_length'], reverse=True)
+        if reverse_sorted_by_length:
+            self.data = sorted(
+                self.data, key=lambda x: x['audio_length'], reverse=True)
 
         self.transforms = transforms
         self.tokenizer = tokenizer
@@ -208,7 +209,22 @@ def seq_collate(results):
 
 if __name__ == "__main__":
     from tokenizer import CharTokenizer
-    transform = mtransforms.DLHLP()
+    transform = torch.nn.Sequential(
+        transforms.MFCC(
+            n_mfcc=40,
+            melkwargs={
+                'n_fft': 1024,
+                'win_length': 1024,
+                'hop_length': 512}),
+        mtransforms.CatDeltas(),
+        mtransforms.CMVN(),
+        mtransforms.Downsample(3))
+    # transform = torch.nn.Sequential(
+    #     mtransforms.KaldiMFCC(num_ceps=13),
+    #     mtransforms.CatDeltas(),
+    #     mtransforms.CMVN(),
+    #     mtransforms.Downsample(3)
+    # )
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
