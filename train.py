@@ -1,6 +1,5 @@
 import argparse
 import os
-import textwrap
 import json
 from datetime import datetime
 
@@ -12,6 +11,7 @@ from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
 from warprnnt_pytorch import RNNTLoss
+from apex import amp
 
 import transforms as mtransforms
 from models import Transducer
@@ -27,9 +27,13 @@ from dataset import (
 
 
 parser = argparse.ArgumentParser(description='RNN-T')
-parser.add_argument('--name', type=str, default='rnn-t')
+parser.add_argument('--name', type=str, default=None)
+parser.add_argument('--name_pattern', type=str, default=(
+                    "E{enc_layers}D{dec_layers}H{hidden_size}-"
+                    "F{n_fft}W{win_length}H{hop_length}"),
+                    help="if --name is None, name_pattern is used")
 parser.add_argument('--eval_model', type=str, default=None,
-                    help='only evaluate model')
+                    help='path to model, only evaluate and exit')
 # learning
 parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
                     help='initial learning rate')
@@ -50,11 +54,11 @@ parser.add_argument('--vocab_embed_size', type=int, default=16,
                     help='vocab embedding dim')
 parser.add_argument('--hidden_size', type=int, default=256,
                     help='RNN hidden dimension')
-parser.add_argument('--enc_num_layers', type=int, default=4,
+parser.add_argument('--enc_layers', type=int, default=4,
                     help='number rnn layers')
 parser.add_argument('--enc_dropout', type=float, default=0.,
                     help='dropout applied to layers (0 = no dropout)')
-parser.add_argument('--dec_num_layers', type=int, default=2,
+parser.add_argument('--dec_layers', type=int, default=2,
                     help='number rnn layers')
 parser.add_argument('--dec_dropout', type=float, default=0.,
                     help='dropout applied to layers (0 = no dropout)')
@@ -90,19 +94,8 @@ parser.add_argument('--eval_step', type=int, default=10000,
                     help='frequency to save model')
 parser.add_argument('--example_size', type=int, default=20,
                     help='size of visualized examples')
-device = torch.device('cuda:0')
-
 args = parser.parse_args()
-if args.apex:
-    from apex import amp
-
-
-log_pattern = textwrap.dedent(
-    '''
-    `True: %s`
-
-    `Pred: %s`
-    ''')
+device = torch.device('cuda:0')
 
 
 def infloop(dataloader):
@@ -160,10 +153,14 @@ def evaluate(model, dataloader, loss_fn, example_size):
 
 
 def main():
-    current = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+    if args.name is None:
+        args.name = args.name_pattern.format(vars(args))
+    current = datetime.now().strftime('%Y%m%d-%H%M%S')
     args.logdir = os.path.join('logs', '%s-%s' % (args.name, current))
     writer = SummaryWriter(args.logdir)
-    writer.add_text('args', json.dumps(vars(args), indent=4))
+    writer.add_text(
+        'args',
+        '`%s`' % json.dumps(vars(args), indent=4).replace('\n', '`\n\n`'))
     print(json.dumps(vars(args)))
 
     transform = torch.nn.Sequential(
@@ -218,9 +215,9 @@ def main():
         vocab_embed_size=args.vocab_embed_size,
         audio_feat_size=args.audio_feat_size * args.sample_frame,
         hidden_size=args.hidden_size,
-        enc_num_layers=args.enc_num_layers,
+        enc_layers=args.enc_layers,
         enc_dropout=args.enc_dropout,
-        dec_num_layers=args.dec_num_layers,
+        dec_layers=args.dec_layers,
         dec_dropout=args.dec_dropout,
         proj_size=args.hidden_size,
     ).to(device)
@@ -297,7 +294,7 @@ def main():
                 writer.add_scalar('WER', wer, step)
                 writer.add_scalar('val_loss', val_loss, step)
                 for i in range(args.example_size):
-                    log = log_pattern % (true_seqs[i], pred_seqs[i])
+                    log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
                     writer.add_text('val/%d' % i, log, step)
                 pbar.write(
                     'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
