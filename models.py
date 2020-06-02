@@ -1,6 +1,5 @@
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -10,13 +9,15 @@ from tokenizer import NUL, PAD, BOS
 
 
 class TimeReduction(nn.Module):
-    def __init__(self, reduction_factor):
+    def __init__(self, reduction_factor=3):
         super().__init__()
         self.reduction_factor = reduction_factor
 
     def forward(self, xs):
         batch_size, xlen, hidden_size = xs.shape
-        pad_shape = [[0, 0], [0, xlen % self.reduction_factor], [0, 0]]
+        pad = self.reduction_factor - xlen % self.reduction_factor
+        pad = pad % self.reduction_factor
+        pad_shape = [0, 0, 0, pad, 0, 0]
         xs = nn.functional.pad(xs, pad_shape)
         xs = xs.view(batch_size, -1, self.reduction_factor, hidden_size)
         xs = xs.mean(dim=2)
@@ -31,7 +32,7 @@ class LayerNormRNN(nn.Module):
                  dropout=0,
                  proj_size=None,
                  time_reductions=None,
-                 reduction_factor=2):
+                 reduction_factor=3):
         super().__init__()
         self.rnns = nn.ModuleList()
         self.projs = nn.ModuleList()
@@ -66,6 +67,7 @@ class LayerNormRNN(nn.Module):
         for rnn, proj, hidden in zip(self.rnns, self.projs, hiddens):
             rnn.flatten_parameters()
             xs, new_hidden = rnn(xs, hidden)
+            xs = proj(xs)
             new_hiddens.append(new_hidden)
         hs, cs = zip(*new_hiddens)
         hs = torch.cat(hs, dim=0)
@@ -110,7 +112,7 @@ class Transducer(nn.Module):
             time_reductions=None)
         # Joint
         self.joint = nn.Sequential(
-            nn.Linear(hidden_size, proj_size),
+            nn.Linear(proj_size, proj_size),
             nn.Tanh(),
             nn.Linear(proj_size, vocab_size),
         )

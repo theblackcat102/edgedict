@@ -1,6 +1,6 @@
 --epochs=30
 --batch_size=32
---sub_batch_size=16
+--sub_batch_size=32
 --eval_batch_size=16
 --lr=0.001
 --optim=sgd
@@ -24,7 +24,7 @@
 --hop_length=160
 --nodelta
 --cmvn
---downsample=3
+--downsample=1
 
 --eval_step=5000
 --save_step=50000

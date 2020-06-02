@@ -44,10 +44,12 @@ class Downsample(torch.nn.Module):
 
     def forward(self, feat):
         feat_length, feat_size = feat.shape
-        feat_length = (feat_length // self.n_frame) * self.n_frame
-        feat_sampled = feat[:feat_length, :]
-        feat_sampled = feat_sampled.reshape(-1, feat_size * self.n_frame)
-        return feat_sampled
+        pad = (self.n_frame - feat_length % self.n_frame) % self.n_frame
+        pad_shape = [0, 0, 0, pad]
+        feat = torch.nn.functional.pad(feat, pad_shape)
+        feat = feat.reshape(-1, feat_size * self.n_frame)
+
+        return feat
 
 
 class Transpose(torch.nn.Module):

@@ -227,6 +227,10 @@ class Trainer:
                         'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
                             epoch, step, val_loss, wer))
 
+    def scale_length(self, xlen):
+        xlen = (xlen.float() / 3).ceil()
+        return xlen.int()
+
     def train_step(self, batch):
         batch = [x.to(device) for x in batch]
         sub_losses = []
@@ -238,6 +242,7 @@ class Trainer:
             xs = xs[:, :xlen.max()]
             ys = ys[:, :ylen.max()].contiguous()
             prob = self.model(xs, ys)
+            xlen = self.scale_length(xlen)
             loss = self.loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
@@ -271,7 +276,10 @@ class Trainer:
             with tqdm(self.dataloader_val, dynamic_ncols=True) as pbar:
                 for batch in pbar:
                     xs, ys, xlen, ylen = [x.to(device) for x in batch]
+                    xs = xs[:, :xlen.max()]
+                    ys = ys[:, :ylen.max()].contiguous()
                     prob = self.model(xs, ys)
+                    xlen = self.scale_length(xlen)
                     loss = self.loss_fn(prob, ys, xlen, ylen)
                     losses.append(loss.item())
 
@@ -329,7 +337,9 @@ class Trainer:
         with torch.no_grad():
             batch = next(iter(self.dataloader_val))
             xs, ys, xlen, ylen = [x.to(device) for x in batch]
+            xlen = self.scale_length(xlen)
             prob = self.model(xs, ys)
+            print(prob.shape, ys.shape, xlen.max(), ylen.max())
             self.loss_fn(prob, ys, xlen, ylen)
             print('Max xs, ys in validation:', xs.shape, ys.shape)
         self.model.train()
