@@ -1,35 +1,43 @@
 # RNN-Transducer example
 
-### TODO
+## TODO
 
-- [ ] Parallelize model training
+- [x] Parallelize model training
 
-- [ ] Use BPE instead of character based tokenizer, should reduce more memory
+- [x] Use BPE instead of character based tokenizer, should reduce more memory
 
-- [ ] Write checkpointing and tensorboardX logger
+- [x] Write checkpointing and tensorboardX logger
 
-- [ ] Modify wraprnnt-pytorch to compatible with apex mixed precision
+- [x] Modify wraprnnt-pytorch to compatible with apex mixed precision
 
-### Install:
+## Install:
 
-Make sure warprnnt pytorch is installed
+- Install apex
+    https://nvidia.github.io/apex/amp.html
 
-Execute models.py to check if everything is properly installed
+    ```
+    git clone https://github.com/NVIDIA/apex
+    cd apex
+    pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+    ```
 
-```
-python models.py
-```
+- Install warprnnt-pytorch
+    https://github.com/HawkAaron/warp-transducer
+    ```
+    git clone https://github.com/HawkAaron/warp-transducer
+    cd warp-transducer
+    mkdir build
+    cd build
+    cmake -DCUDA_TOOLKIT_ROOT_DIR=$CUDA_HOME ..
+    make
+    cd ../pytorch_binding
+    export CUDA_HOME="/usr/local/cuda"
+    python setup.py install
+    ```
 
+## Datasets:
 
-### Datasets:
-
-0. VoxCeleb
-
-    i. Apply for username and password from VoxCeleb
-
-    ii. Download corpus using this repo: https://github.com/clovaai/voxceleb_trainer
-
-1. Common Voice : 178.621 hrs
+- Common Voice : 178.621 hrs
 
     ```
     mkdir common_voice
@@ -42,16 +50,16 @@ python models.py
 
     ii. execute preprocess_common_voice.py to convert audio to 16k, PCM 16bits wav files ( this takes around 20 hours )
 
-2. Youtube Caption : 118 hrs
+- Youtube Caption : 118 hrs
 
 
-3. Librispeech release 1 : 348 hrs
+- Librispeech release 1 : 348 hrs
 
     ```
     python dataprep_librispeech.py [path/to/data] --download --extract
     ```
 
-4. TEDLIUM: 118.05 hrs
+- TEDLIUM: 118.05 hrs
 
     Either download release 1 or 3 ( version 1 is smaller )
 
@@ -66,29 +74,20 @@ python models.py
 
 ## Data path
 ```
-RNN-T/ -> github repo
-common_voice/
-    clips
-        - all the audio
-    train.tsv
-youtube-speech-text/
-    english/
-        - all the audio
-    english_meta.csv
+.
+├──RNN-T/                   # this repo
+├──common_voice/
+│   ├──clips/               # all the audio
+│   └──train.tsv
+├──youtube-speech-text/
+│   ├──english/             # all the audio
+│   └──english_meta.csv
+├──TEDLIUM_release1/
+│   ├──train/
+│   │   └──wav              # all the audio
+│   └──test/
+│       └──wav              # all the audio
+└──LibriSpeech/
+    ├──train-clean-360/
+    └──test-clean/
 ```
-
-
-## Install Apex
-
-Note wrap rnn DO NOT support Half precision operation, so no Apex support
-
-https://nvidia.github.io/apex/amp.html
-
-```
-git clone https://github.com/NVIDIA/apex
-cd apex
-pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
-```
-
-
-

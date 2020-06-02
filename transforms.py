@@ -15,9 +15,9 @@ class KaldiMFCC(torch.nn.Module):
 
 class CatDeltas(torch.nn.Module):
     def forward(self, feat):
-        d1 = torchaudio.functional.compute_deltas(feat)
+        d1 = torchaudio.functional.compute_deltas(feat.T)
         d2 = torchaudio.functional.compute_deltas(d1)
-        feat = torch.cat([feat, d1, d2], dim=-1)
+        feat = torch.cat([feat, d1.T, d2.T], dim=-1)
         return feat
 
 
@@ -46,7 +46,7 @@ class Downsample(torch.nn.Module):
         feat_length, feat_size = feat.shape
         feat_length = (feat_length // self.n_frame) * self.n_frame
         feat_sampled = feat[:feat_length, :]
-        feat_sampled = feat_sampled.reshape(feat_size * self.n_frame, -1)
+        feat_sampled = feat_sampled.reshape(-1, feat_size * self.n_frame)
         return feat_sampled
 
 
