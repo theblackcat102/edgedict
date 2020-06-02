@@ -28,11 +28,11 @@ parser.add_argument('--name_pattern', type=str, default=(
 parser.add_argument('--eval_model', type=str, default=None,
                     help='path to model, only evaluate and exit')
 # learning
-parser.add_argument('--optimizer', default="adam", choices=['adam', 'sgd'],
+parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
                     help='initial learning rate')
 parser.add_argument('--lr', type=float, default=5e-4,
                     help='initial learning rate')
-parser.add_argument('--scheduler', action='store_true',
+parser.add_argument('--sched', action='store_true',
                     help='reduce lr on plateau')
 parser.add_argument('--epochs', type=int, default=200,
                     help='upper epoch limit')
@@ -104,10 +104,12 @@ def infloop(dataloader):
 class Trainer:
     def __init__(self, args):
         self.args = args
-        self.args.name = self.args.name_pattern.format(**vars(self.args))
+        if args.name is None:
+            args.name = args.name_pattern.format(**vars(args))
         current = datetime.now().strftime('%Y%m%d-%H%M%S')
-        self.args.logdir = os.path.join('logs', '%s-%s' % (args.name, current))
-        self.args.model_dir = os.path.join(args.logdir, 'models')
+        args.logdir = os.path.join('logs', '%s-%s' % (args.name, current))
+        args.model_dir = os.path.join(args.logdir, 'models')
+        os.makedirs(args.model_dir, exist_ok=True)
         self.writer = SummaryWriter(args.logdir)
         self.writer.add_text('args', '`%s`' % json.dumps(vars(args)))
         print(json.dumps(vars(args)))
@@ -160,15 +162,15 @@ class Trainer:
             proj_size=args.hidden_size,
         ).to(device)
 
-        if args.optimizer == 'adam':
+        if args.optim == 'adam':
             self.optim = optim.Adam(
                 self.model.parameters(), lr=args.lr)
         else:
             self.optim = optim.SGD(
                 self.model.parameters(), lr=args.lr, momentum=0.9)
-        if args.scheduler:
+        if args.sched:
             self.sched = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optim, patience=2, factor=0.5)
+                self.optim, patience=1, factor=0.5)
         else:
             self.sched = None
         self.loss_fn = RNNTLoss(blank=NUL)
@@ -200,11 +202,13 @@ class Trainer:
                 if step > 0 and step % self.args.save_step == 0:
                     self.save(step)
 
-                if step > 0 and step % self.args.eval_step == 0:
+                if step >= 0 and step % self.args.eval_step == 0:
                     pbar.set_description('Evaluating ...')
                     val_loss, wer, pred_seqs, true_seqs = self.evaluate()
                     self.writer.add_scalar('WER', wer, step)
                     self.writer.add_scalar('val_loss', val_loss, step)
+                    if self.args.sched is not None:
+                        self.sched.step(val_loss)
                     for i in range(self.args.sample_size):
                         log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
                         self.writer.add_text('val/%d' % i, log, step)
@@ -278,37 +282,36 @@ class Trainer:
         return loss, wer, pred_seqs, true_seqs
 
     def save(self, step):
-        if not os.path.exists(self.args.model_dir):
-            os.mkdir(self.args.model_dir)
         checkpoint = {'optim': self.optim.state_dict()}
 
-        if self.sched is not None:
-            checkpoint.update({'sched': self.sched.state_dict()})
-
-        if isinstance(self.model, torch.nn.DataParallel):
+        if self.args.multi_gpu:
             checkpoint = {'model': self.model.module.state_dict()}
         else:
             checkpoint = {'model': self.model.state_dict()}
 
+        if self.sched is not None:
+            checkpoint.update({'sched': self.sched.state_dict()})
+
         if self.args.apex:
             checkpoint.update({'amp': amp.state_dict()})
+
         path = os.path.join(self.args.model_dir, 'epoch-%d' % step)
         torch.save(checkpoint, path)
 
     def load(self, path):
         checkpoint = torch.load(args.eval_model)
-        # self.optim.load_state_dict(checkpoint['optim'])
+        self.optim.load_state_dict(checkpoint['optim'])
 
-        if self.sched is not None:
-            self.sched.load_state_dict(checkpoint['sched'])
-
-        if isinstance(self.model, torch.nn.DataParallel):
+        if self.args.multi_gpu:
             self.model.module.load_state_dict(checkpoint['model'])
         else:
             self.model.load_state_dict(checkpoint['model'])
 
-        # if self.args.apex:
-        #     amp.load_state_dict(checkpoint['amp'])
+        if self.sched is not None:
+            self.sched.load_state_dict(checkpoint['sched'])
+
+        if self.args.apex:
+            amp.load_state_dict(checkpoint['amp'])
 
 
 if __name__ == "__main__":
@@ -319,7 +322,7 @@ if __name__ == "__main__":
         trainer.load(args.eval_model)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
-            print('True: %s\n\nPred:%s\n')
+            print('True: %s\n\nPred:%s' % (pred_seq, true_seq))
             print('=' * 20)
         print('Evaluate, loss: %.4f, WER: %.4f' % (val_loss, wer))
     else:
