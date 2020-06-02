@@ -77,7 +77,7 @@ class Transducer(nn.Module):
     def __init__(self,
                  vocab_size,
                  vocab_embed_size,
-                 audio_feat_size,
+                 input_size,
                  hidden_size=256,
                  enc_layers=3,
                  enc_dropout=0,
@@ -91,7 +91,7 @@ class Transducer(nn.Module):
         self.blank = blank
         # Encoder
         self.encoder = LayerNormRNN(
-            input_size=audio_feat_size,
+            input_size=input_size,
             hidden_size=hidden_size,
             num_layers=enc_layers,
             dropout=enc_dropout,
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     # model = Transducer(
     #     vocab_size=34,
     #     vocab_embed_size=16,
-    #     audio_feat_size=40,
+    #     input_size=40,
     #     proj_size=256)
     # loss_fn = RNNTLoss(blank=0)
     # xs = torch.randn((2, 200, 40)).float()
@@ -374,7 +374,7 @@ if __name__ == "__main__":
     model = Transducer(
         vocab_size=34,
         vocab_embed_size=16,
-        audio_feat_size=40,
+        input_size=40,
         enc_layers=2,
         dec_layers=1,
         proj_size=256).cuda()

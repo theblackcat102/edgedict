@@ -1,6 +1,4 @@
-import argparse
 import os
-import json
 from datetime import datetime
 
 import jiwer
@@ -8,88 +6,62 @@ import torch
 import torchaudio.transforms as transforms
 import numpy as np
 import torch.optim as optim
+from absl import app, flags
 from apex import amp
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
 from warprnnt_pytorch import RNNTLoss
 
-from models import Transducer
-from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 from dataset import seq_collate, MergedDataset, Librispeech
+from models import Transducer
+from transforms import CatDeltas, CMVN, Downsample, Transpose
+from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 
 
-parser = argparse.ArgumentParser(description='RNN-T')
-parser.add_argument('--name', type=str, default=None)
-parser.add_argument('--name_pattern', type=str, default=(
-                    "E{enc_layers}D{dec_layers}H{hidden_size}-"
-                    "F{n_fft}W{win_length}H{hop_length}"),
-                    help="if --name is None, name_pattern is used")
-parser.add_argument('--eval_model', type=str, default=None,
-                    help='path to model, only evaluate and exit')
+FLAGS = flags.FLAGS
+flags.DEFINE_string('name', 'rnn-t', help='session name')
+flags.DEFINE_string('eval_model', None, help='evaluate and exit')
+flags.DEFINE_string('resume_from', None, help='evaluate and exit')
 # learning
-parser.add_argument('--optim', default="adam", choices=['adam', 'sgd'],
-                    help='initial learning rate')
-parser.add_argument('--lr', type=float, default=5e-4,
-                    help='initial learning rate')
-parser.add_argument('--sched', action='store_true',
-                    help='reduce lr on plateau')
-parser.add_argument('--epochs', type=int, default=200,
-                    help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=8,
-                    help='batch size')
-parser.add_argument('--sub_batch_size', type=int, default=8,
-                    help='sub batch size')
-parser.add_argument('--eval_batch_size', type=int, default=8,
-                    help='batch size')
-parser.add_argument('--gradclip', default=None, type=float,
-                    help='clip norm value')
+flags.DEFINE_integer('warmup_step', 0, help='linearly increase lr')
+flags.DEFINE_multi_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
+flags.DEFINE_float('lr', 5e-4, help='initial learning rate')
+flags.DEFINE_bool('sched', False, help='reduce lr on plateau')
+flags.DEFINE_integer('epochs', 30, help='epoch')
+flags.DEFINE_integer('batch_size', 8, help='batch size')
+flags.DEFINE_integer('sub_batch_size', 8, help='accumulate batch size')
+flags.DEFINE_integer('eval_batch_size', 8, help='evaluation batch size')
+flags.DEFINE_float('gradclip', None, help='clip norm value')
 # model
-parser.add_argument('--vocab_embed_size', type=int, default=16,
-                    help='vocab embedding dim')
-parser.add_argument('--hidden_size', type=int, default=256,
-                    help='RNN hidden dimension')
-parser.add_argument('--enc_layers', type=int, default=4,
-                    help='number rnn layers')
-parser.add_argument('--enc_dropout', type=float, default=0.,
-                    help='dropout applied to layers (0 = no dropout)')
-parser.add_argument('--dec_layers', type=int, default=2,
-                    help='number rnn layers')
-parser.add_argument('--dec_dropout', type=float, default=0.,
-                    help='dropout applied to layers (0 = no dropout)')
+flags.DEFINE_integer('vocab_embed_size', 16, help='vocab embedding dim')
+flags.DEFINE_integer('hidden_size', 256, help='RNN hidden dimension')
+flags.DEFINE_integer('prog_size', 256, help='RNN hidden dimension')
+flags.DEFINE_integer('enc_layers', 3, help='encoder layers')
+flags.DEFINE_float('enc_dropout', 0., help='encoder dropout')
+flags.DEFINE_integer('dec_layers', 1, help='decoder layers')
+flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 # data preprocess
-parser.add_argument('--audio_max_length', type=int, default=14,
-                    help='audio max length')
-parser.add_argument('--audio_feat_size', type=int, default=40,
-                    help='audio feature dimension size')
-parser.add_argument('--n_fft', type=int, default=1024,
-                    help='window size of fft')
-parser.add_argument('--win_length', type=int, default=1024,
-                    help='window length of frame')
-parser.add_argument('--hop_length', type=int, default=512,
-                    help='hop length between frame')
-parser.add_argument('--sample_frame', type=int, default=1,
-                    help='downsample audio feature by concatenating')
-parser.add_argument('--tokenizer', default='char', choices=['char', 'bpe'],
-                    help='tokenizer')
-parser.add_argument('--bpe_size', type=int, default=256,
-                    help='BPE vocabulary size')
+flags.DEFINE_integer('audio_max_length', 14, help='max length in seconds')
+flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec'], help='audio feature')
+flags.DEFINE_integer('feature_size', 40, help='mel_bins')
+flags.DEFINE_integer('n_fft', 1024, help='spectrogram')
+flags.DEFINE_integer('win_length', 1024, help='spectrogram')
+flags.DEFINE_integer('hop_length', 512, help='spectrogram')
+flags.DEFINE_bool('delta', False, help='concat delta and detal of dealt')
+flags.DEFINE_bool('cmvn', False, help='normalize spectrogram')
+flags.DEFINE_integer('downsample', 1, help='downsample audio feature')
+flags.DEFINE_multi_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
+flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 # apex
-parser.add_argument('--apex', default=False, action='store_true',
-                    help='use mix precision')
-parser.add_argument('--opt_level', default='O1', type=str,
-                    help='operation level')
+flags.DEFINE_bool('apex', default=True, help='use mix precision')
+flags.DEFINE_string('opt_level', 'O1', help='operation level')
 # parallel
-parser.add_argument('--multi_gpu', action='store_true',
-                    help='DataParallel')
+flags.DEFINE_bool('multi_gpu', False, help='DataParallel')
 # log
-parser.add_argument('--save_step', type=int, default=50000,
-                    help='frequency to save model')
-parser.add_argument('--eval_step', type=int, default=10000,
-                    help='frequency to save model')
-parser.add_argument('--sample_size', type=int, default=20,
-                    help='size of visualized examples')
-args = parser.parse_args()
+flags.DEFINE_integer('save_step', 10000, help='frequency to save model')
+flags.DEFINE_integer('eval_step', 10000, help='frequency to save model')
+flags.DEFINE_integer('sample_size', 20, help='size of visualized examples')
 device = torch.device('cuda:0')
 
 
@@ -102,40 +74,63 @@ def infloop(dataloader):
 
 
 class Trainer:
-    def __init__(self, args):
-        self.args = args
-        if args.name is None:
-            args.name = args.name_pattern.format(**vars(args))
+    def __init__(self):
+        self.name = FLAGS.name
         current = datetime.now().strftime('%Y%m%d-%H%M%S')
-        args.logdir = os.path.join('logs', '%s-%s' % (args.name, current))
-        args.model_dir = os.path.join(args.logdir, 'models')
-        os.makedirs(args.model_dir, exist_ok=True)
-        self.writer = SummaryWriter(args.logdir)
-        self.writer.add_text('args', '`%s`' % json.dumps(vars(args)))
-        print(json.dumps(vars(args)))
+        self.logdir = os.path.join('logs', '%s-%s' % (FLAGS.name, current))
+        self.model_dir = os.path.join(self.logdir, 'models')
+        os.makedirs(self.model_dir, exist_ok=True)
+        self.writer = SummaryWriter(self.logdir)
+        self.writer.add_text(
+            'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
+        FLAGS.append_flags_into_file(
+            os.path.join(self.logdir, 'flagfile.txt'))
 
-        transform = torch.nn.Sequential(
-            transforms.MFCC(
-                n_mfcc=args.audio_feat_size,
-                melkwargs={
-                    'n_fft': args.n_fft,
-                    'win_length': args.win_length,
-                    'hop_length': args.hop_length}))
+        # Transform
+        if FLAGS.feature == 'mfcc':
+            transform = [
+                transforms.MFCC(
+                    n_mfcc=FLAGS.feature_size,
+                    melkwargs={
+                        'n_fft': FLAGS.n_fft,
+                        'win_length': FLAGS.win_length,
+                        'hop_length': FLAGS.hop_length}),
+                Transpose()]
+        elif FLAGS.feature == 'melspec':
+            transform = [
+                transforms.MelSpectrogram(
+                    n_mels=FLAGS.feature_size,
+                    n_fft=FLAGS.n_fft,
+                    win_length=FLAGS.win_length,
+                    hop_length=FLAGS.hop_length),
+                Transpose()]
+        input_size = FLAGS.feature_size
+        if FLAGS.delta:
+            transform.append(CatDeltas())
+            input_size = input_size * 3
+        if FLAGS.cmvn:
+            transform.append(CMVN())
+        if FLAGS.downsample > 1:
+            transform.append(Downsample(FLAGS.downsample))
+            input_size = input_size * FLAGS.downsample
+        transform = torch.nn.Sequential(*transform)
 
-        if args.tokenizer == 'bpe':
+        # Tokenizer
+        if FLAGS.tokenizer == 'bpe':
             self.tokenizer = HuggingFaceTokenizer(
-                cache_dir=args.logdir, vocab_size=args.bpe_size)
+                cache_dir=self.logdir, vocab_size=FLAGS.bpe_size)
         else:
-            self.tokenizer = CharTokenizer(cache_dir=args.logdir)
+            self.tokenizer = CharTokenizer(cache_dir=self.logdir)
 
+        # Dataloader
         self.dataloader_train = DataLoader(
             dataset=MergedDataset([
                 Librispeech(
                     '../LibriSpeech/train-clean-360/',
                     tokenizer=self.tokenizer,
                     transforms=transform,
-                    audio_max_length=args.audio_max_length)]),
-            batch_size=args.batch_size, shuffle=True, num_workers=4,
+                    audio_max_length=FLAGS.audio_max_length)]),
+            batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
             collate_fn=seq_collate, drop_last=True)
 
         self.dataloader_val = DataLoader(
@@ -145,40 +140,51 @@ class Trainer:
                     tokenizer=self.tokenizer,
                     transforms=transform,
                     reverse_sorted_by_length=True)]),
-            batch_size=args.eval_batch_size, shuffle=False, num_workers=4,
+            batch_size=FLAGS.eval_batch_size, shuffle=False, num_workers=4,
             collate_fn=seq_collate)
 
         self.tokenizer.build(self.dataloader_train.dataset.texts())
 
+        # Model
         self.model = Transducer(
             vocab_size=self.dataloader_train.dataset.tokenizer.vocab_size,
-            vocab_embed_size=args.vocab_embed_size,
-            audio_feat_size=args.audio_feat_size * args.sample_frame,
-            hidden_size=args.hidden_size,
-            enc_layers=args.enc_layers,
-            enc_dropout=args.enc_dropout,
-            dec_layers=args.dec_layers,
-            dec_dropout=args.dec_dropout,
-            proj_size=args.hidden_size,
+            vocab_embed_size=FLAGS.vocab_embed_size,
+            input_size=input_size,
+            hidden_size=FLAGS.hidden_size,
+            enc_layers=FLAGS.enc_layers,
+            enc_dropout=FLAGS.enc_dropout,
+            dec_layers=FLAGS.dec_layers,
+            dec_dropout=FLAGS.dec_dropout,
+            proj_size=FLAGS.prog_size,
         ).to(device)
 
-        if args.optim == 'adam':
+        # Optimizer
+        if FLAGS.optim == 'adam':
             self.optim = optim.Adam(
-                self.model.parameters(), lr=args.lr)
+                self.model.parameters(), lr=FLAGS.lr)
         else:
             self.optim = optim.SGD(
-                self.model.parameters(), lr=args.lr, momentum=0.9)
-        if args.sched:
+                self.model.parameters(), lr=FLAGS.lr, momentum=0.9)
+        # Scheduler
+        if FLAGS.sched:
             self.sched = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optim, patience=1, factor=0.5)
+                self.optim, patience=1, factor=0.5, min_lr=1e-6, verbose=1)
         else:
             self.sched = None
+        if FLAGS.warmup_step > 0:
+            self.warmup_sched = optim.lr_scheduler.LambdaLR(
+                self.optim, lambda step: step / FLAGS.warmup_step)
+        else:
+            self.warmup_sched = None
+        # Loss
         self.loss_fn = RNNTLoss(blank=NUL)
 
-        if args.apex:
+        # Apex
+        if FLAGS.apex:
             self.model, self.optim = amp.initialize(
-                self.model, self.optim, opt_level=args.opt_level)
-        if args.multi_gpu:
+                self.model, self.optim, opt_level=FLAGS.opt_level)
+        # Multi GPU
+        if FLAGS.multi_gpu:
             self.model = torch.nn.DataParallel(self.model)
 
         self.tokenizer = self.dataloader_train.dataset.tokenizer
@@ -186,30 +192,35 @@ class Trainer:
     def train(self):
         looper = infloop(self.dataloader_train)
         losses = []
-        steps = len(self.dataloader_train) * self.args.epochs
+        steps = len(self.dataloader_train) * FLAGS.epochs
         with trange(steps, dynamic_ncols=True) as pbar:
             for step in pbar:
                 batch, epoch = next(looper)
                 loss = self.train_step(batch)
                 losses.append(loss)
-                pbar.set_description('Epoch %d, loss: %.4f' % (epoch, loss))
+                lr = self.optim.param_groups[0]['lr'] * 1000
+                pbar.set_description(
+                    'Epoch %d, loss: %.4f, 1000lr: %.4f' % (epoch, loss, lr))
+
+                if FLAGS.warmup_step > 0 and step < FLAGS.warmup_step:
+                    self.warmup_sched.step()
 
                 if step > 0 and step % 5 == 0:
                     train_loss = torch.stack(losses).mean()
                     self.writer.add_scalar('train_loss', train_loss, step)
                     losses = []
 
-                if step > 0 and step % self.args.save_step == 0:
+                if step > 0 and step % FLAGS.save_step == 0:
                     self.save(step)
 
-                if step >= 0 and step % self.args.eval_step == 0:
+                if step > 0 and step % FLAGS.eval_step == 0:
                     pbar.set_description('Evaluating ...')
                     val_loss, wer, pred_seqs, true_seqs = self.evaluate()
                     self.writer.add_scalar('WER', wer, step)
                     self.writer.add_scalar('val_loss', val_loss, step)
-                    if self.args.sched is not None:
+                    if FLAGS.sched and step >= FLAGS.warmup_step:
                         self.sched.step(val_loss)
-                    for i in range(self.args.sample_size):
+                    for i in range(FLAGS.sample_size):
                         log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
                         self.writer.add_text('val/%d' % i, log, step)
                     pbar.write(
@@ -219,16 +230,16 @@ class Trainer:
     def train_step(self, batch):
         batch = [x.to(device) for x in batch]
         sub_losses = []
-        start_idxs = range(0, self.args.batch_size, self.args.sub_batch_size)
+        start_idxs = range(0, FLAGS.batch_size, FLAGS.sub_batch_size)
         self.optim.zero_grad()
         for sub_batch_idx, start_idx in enumerate(start_idxs):
-            sub_slice = slice(start_idx, start_idx + self.args.sub_batch_size)
+            sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
             xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
             xs = xs[:, :xlen.max()]
             ys = ys[:, :ylen.max()].contiguous()
             prob = self.model(xs, ys)
             loss = self.loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
-            if self.args.apex:
+            if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
                         loss,
@@ -239,12 +250,12 @@ class Trainer:
                 loss.backward()
             sub_losses.append(loss.detach())
 
-        if self.args.gradclip is not None:
-            if self.args.apex:
+        if FLAGS.gradclip is not None:
+            if FLAGS.apex:
                 parameters = amp.master_params(self.optim)
             else:
                 parameters = self.model.parameters()
-            torch.nn.utils.clip_grad_norm_(parameters, self.args.gradclip)
+            torch.nn.utils.clip_grad_norm_(parameters, FLAGS.gradclip)
         self.optim.step()
 
         loss = torch.stack(sub_losses).sum()
@@ -265,7 +276,7 @@ class Trainer:
                     losses.append(loss.item())
 
                     xs = xs.to(device)
-                    if args.multi_gpu:
+                    if FLAGS.multi_gpu:
                         ys_hat, nll = self.model.module.greedy_decode(xs, xlen)
                     else:
                         ys_hat, nll = self.model.greedy_decode(xs, xlen)
@@ -273,7 +284,7 @@ class Trainer:
                     true_seq = self.tokenizer.decode_plus(ys.cpu().numpy())
                     wer.append(jiwer.wer(true_seq, pred_seq))
                     pbar.set_description('wer: %.4f' % wer[-1])
-                    sample_nums = self.args.sample_size - len(pred_seqs)
+                    sample_nums = FLAGS.sample_size - len(pred_seqs)
                     pred_seqs.extend(pred_seq[:sample_nums])
                     true_seqs.extend(true_seq[:sample_nums])
         loss = np.mean(losses)
@@ -284,7 +295,7 @@ class Trainer:
     def save(self, step):
         checkpoint = {'optim': self.optim.state_dict()}
 
-        if self.args.multi_gpu:
+        if FLAGS.multi_gpu:
             checkpoint = {'model': self.model.module.state_dict()}
         else:
             checkpoint = {'model': self.model.state_dict()}
@@ -292,17 +303,17 @@ class Trainer:
         if self.sched is not None:
             checkpoint.update({'sched': self.sched.state_dict()})
 
-        if self.args.apex:
+        if FLAGS.apex:
             checkpoint.update({'amp': amp.state_dict()})
 
-        path = os.path.join(self.args.model_dir, 'epoch-%d' % step)
+        path = os.path.join(self.model_dir, 'epoch-%d' % step)
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(args.eval_model)
+        checkpoint = torch.load(FLAGS.eval_model)
         self.optim.load_state_dict(checkpoint['optim'])
 
-        if self.args.multi_gpu:
+        if FLAGS.multi_gpu:
             self.model.module.load_state_dict(checkpoint['model'])
         else:
             self.model.load_state_dict(checkpoint['model'])
@@ -310,28 +321,36 @@ class Trainer:
         if self.sched is not None:
             self.sched.load_state_dict(checkpoint['sched'])
 
-        if self.args.apex:
+        if FLAGS.apex:
             amp.load_state_dict(checkpoint['amp'])
 
+    def sanity_check(self):
+        self.model.eval()
+        with torch.no_grad():
+            batch = next(iter(self.dataloader_val))
+            xs, ys, xlen, ylen = [x.to(device) for x in batch]
+            prob = self.model(xs, ys)
+            self.loss_fn(prob, ys, xlen, ylen)
+            print('Max xs, ys in validation:', xs.shape, ys.shape)
+        self.model.train()
 
-if __name__ == "__main__":
 
-    trainer = Trainer(args)
+def main(argv):
+    trainer = Trainer()
 
-    if args.eval_model:
-        trainer.load(args.eval_model)
+    if FLAGS.eval_model:
+        trainer.load(FLAGS.eval_model)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
             print('True: %s\n\nPred:%s' % (pred_seq, true_seq))
             print('=' * 20)
         print('Evaluate, loss: %.4f, WER: %.4f' % (val_loss, wer))
     else:
+        if FLAGS.resume_from:
+            trainer.load(FLAGS.resume_from)
+        trainer.sanity_check()
         trainer.train()
 
-    # model.eval()
-    # with torch.no_grad():
-    #     batch = next(iter(val_dataloader))
-    #     xs, ys, xlen, ylen = [x.to(device) for x in batch]
-    #     prob = model(xs, ys)
-    #     loss = loss_fn(prob, ys, xlen, ylen)
-    # model.train()
+
+if __name__ == "__main__":
+    app.run(main)

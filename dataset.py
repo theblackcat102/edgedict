@@ -89,17 +89,12 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         path = os.path.join(self.root, self.data[idx]['path'])
         data, sr = torchaudio.load(path, normalization=True)
-
-        if isinstance(self.transforms, list):
-            for trans in self.transforms:
-                data = trans(data[0])
-        else:
-            data = self.transforms(data[0])
+        data = self.transforms(data[0])
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
 
-        return data.T, tokens
+        return data, tokens
 
 
 class YoutubeCaption(AudioDataset):
@@ -210,21 +205,24 @@ def seq_collate(results):
 if __name__ == "__main__":
     from tokenizer import CharTokenizer
     transform = torch.nn.Sequential(
+        # transforms.MelSpectrogram(n_mels=40),
         transforms.MFCC(
             n_mfcc=40,
             melkwargs={
-                'n_fft': 1024,
-                'win_length': 1024,
-                'hop_length': 512}),
-        mtransforms.CatDeltas(),
-        mtransforms.CMVN(),
-        mtransforms.Downsample(3))
-    # transform = torch.nn.Sequential(
-    #     mtransforms.KaldiMFCC(num_ceps=13),
-    #     mtransforms.CatDeltas(),
-    #     mtransforms.CMVN(),
-    #     mtransforms.Downsample(3)
-    # )
+                'n_fft': 512,
+                'win_length': 400,
+                'hop_length': 160}),
+        mtransforms.Transpose(),
+        # mtransforms.CatDeltas(),
+        # mtransforms.CMVN(),
+        # mtransforms.Downsample(3)
+    )
+    transform = torch.nn.Sequential(
+        mtransforms.KaldiMFCC(num_mel_bins=40, num_ceps=40),
+        # mtransforms.CatDeltas(),
+        # mtransforms.CMVN(),
+        # mtransforms.Downsample(3)
+    )
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
@@ -249,6 +247,7 @@ if __name__ == "__main__":
 
     xs, ys, xlen, ylen = next(iter(train_dataloader))
     print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    print(xs.sum(dim=-1))
 
     xs, ys, xlen, ylen = next(iter(val_dataloader))
     print(xs.shape, ys.shape, xlen.shape, ylen.shape)
