@@ -3,7 +3,9 @@ logs
 save/
 outputs/
 BPE
+venv10.0
 venv10.1
+venv10.2
 
 
 # Byte-compiled / optimized / DLL files

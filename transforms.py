@@ -9,7 +9,7 @@ class KaldiMFCC(torch.nn.Module):
 
     def forward(self, wave_form):
         feat = torchaudio.compliance.kaldi.mfcc(
-            wave_form[None], channel=0, **self.kwargs)
+            wave_form, channel=0, **self.kwargs)
         return feat
 
 
@@ -54,4 +54,4 @@ class Downsample(torch.nn.Module):
 
 class Transpose(torch.nn.Module):
     def forward(self, feat):
-        return feat.T
+        return feat[0].T

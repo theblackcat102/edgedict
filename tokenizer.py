@@ -77,7 +77,7 @@ class CharTokenizer:
         text = str(text).lower()
         text = text[:max_length]
         text = [self.token2id.get(char, UNK) for char in text]
-        return [BOS] + text + [EOS]
+        return text + [EOS]
 
     def decode(self, tokens):
         text = ''.join([self.id2token[token] for token in tokens])

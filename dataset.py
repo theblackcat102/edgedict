@@ -89,7 +89,7 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         path = os.path.join(self.root, self.data[idx]['path'])
         data, sr = torchaudio.load(path, normalization=True)
-        data = self.transforms(data[0])
+        data = self.transforms(data[:1])
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
@@ -245,9 +245,11 @@ if __name__ == "__main__":
 
     tokenizer.build(train_dataloader.dataset.texts())
 
-    xs, ys, xlen, ylen = next(iter(train_dataloader))
-    print(xs.shape, ys.shape, xlen.shape, ylen.shape)
-    print(xs.sum(dim=-1))
+    from tqdm import tqdm
+    for batch in tqdm(train_dataloader):
+        xs, ys, xlen, ylen = batch
+        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+        # print(xs.sum(dim=-1))
 
     xs, ys, xlen, ylen = next(iter(val_dataloader))
     print(xs.shape, ys.shape, xlen.shape, ylen.shape)
