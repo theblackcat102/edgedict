@@ -1,11 +1,9 @@
-logs
 .vscode/
+logs
 save/
 outputs/
 BPE
-venv10.0
-venv10.1
-venv10.2
+data
 
 
 # Byte-compiled / optimized / DLL files
@@ -122,6 +120,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+pytorch1.3.1cu101
+pytorch1.4.0cu101
+pytorch1.5.0cu102
 
 # Spyder project settings
 .spyderproject

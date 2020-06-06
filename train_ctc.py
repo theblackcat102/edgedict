@@ -11,6 +11,7 @@ from apex import amp
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
+from warpctc_pytorch import CTCLoss
 
 from dataset import seq_collate, MergedDataset, Librispeech
 from models import CTCEncoder
@@ -27,8 +28,8 @@ flags.DEFINE_multi_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
 flags.DEFINE_float('lr', 5e-4, help='initial learning rate')
 flags.DEFINE_bool('sched', True, help='reduce lr on plateau')
 flags.DEFINE_integer('epochs', 30, help='epoch')
-flags.DEFINE_integer('batch_size', 8, help='batch size')
-flags.DEFINE_integer('sub_batch_size', 8, help='accumulate batch size')
+flags.DEFINE_integer('batch_size', 32, help='batch size')
+flags.DEFINE_integer('sub_batch_size', 32, help='accumulate batch size')
 flags.DEFINE_integer('eval_batch_size', 64, help='evaluation batch size')
 flags.DEFINE_float('gradclip', None, help='clip norm value')
 # encoder
@@ -177,7 +178,8 @@ class CTCTrainer:
         else:
             self.sched = None
         # Loss
-        self.loss_fn = torch.nn.CTCLoss(blank=NUL)
+        # self.loss_fn = torch.nn.CTCLoss(blank=NUL, reduction='sum')
+        self.loss_fn = CTCLoss(blank=NUL, size_average=True)
 
         # Apex
         if FLAGS.apex:
@@ -222,18 +224,20 @@ class CTCTrainer:
                             epoch, step, val_loss, wer))
 
     def train_step(self, batch):
-        batch = [x.to(device) for x in batch]
         sub_losses = []
         start_idxs = range(0, FLAGS.batch_size, FLAGS.sub_batch_size)
         self.optim.zero_grad()
         for sub_batch_idx, start_idx in enumerate(start_idxs):
             sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
             xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
+            xs = xs.to(device)
             xs = xs[:, :xlen.max()]
             ys = ys[:, :ylen.max()].contiguous()
             logprobs = self.model(xs)
             logprobs = logprobs.transpose(0, 1)
-            loss = self.loss_fn(logprobs, ys, xlen, ylen) / len(start_idxs)
+            ys_flatten = torch.cat([y[:leng] for y, leng in zip(ys, ylen)])
+            loss = self.loss_fn(logprobs, ys_flatten, xlen, ylen)
+            loss = loss / len(xs) / len(start_idxs)
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
@@ -280,12 +284,15 @@ class CTCTrainer:
 
     def evaluate_step(self, batch):
         with torch.no_grad():
-            xs, ys, xlen, ylen = [x.to(device) for x in batch]
+            xs, ys, xlen, ylen = batch
+            xs = xs.to(device)
             xs = xs[:, :xlen.max()]
             ys = ys[:, :ylen.max()].contiguous()
-            # logprobs = self.model(xs)
-            # loss = self.loss_fn(
-            #     logprobs.transpose(0, 1), ys, xlen, ylen)
+            logprobs = self.model(xs.to(device))
+            ys_flatten = torch.cat([y[:leng] for y, leng in zip(ys, ylen)])
+            loss = self.loss_fn(
+                logprobs.transpose(0, 1), ys_flatten, xlen, ylen)
+            loss = loss / len(xs)
 
             if FLAGS.multi_gpu:
                 ys_hat, nll = self.model.module.greedy_decode(xs, xlen)
@@ -294,7 +301,7 @@ class CTCTrainer:
             pred_seq = self.tokenizer.decode_plus(ys_hat)
             true_seq = self.tokenizer.decode_plus(ys.cpu().numpy())
             wer = jiwer.wer(true_seq, pred_seq)
-        return 0, wer, pred_seq, true_seq
+        return loss.item(), wer, pred_seq, true_seq
 
     def save(self, step):
         checkpoint = {'optim': self.optim.state_dict()}

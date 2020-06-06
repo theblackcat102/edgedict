@@ -5,29 +5,87 @@ from torch import nn
 from tokenizer import NUL, BOS
 
 
-class Encoder(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, dropout=0,
-                 proj_size=None):
+class TimeReduction(nn.Module):
+    def __init__(self, reduction_factor=2):
         super().__init__()
-        self.lstm = nn.LSTM(
-            input_size, hidden_size, num_layers,
-            batch_first=True, dropout=dropout)
+        self.reduction_factor = reduction_factor
+
+    def forward(self, xs):
+        batch_size, xlen, hidden_size = xs.shape
+        pad = self.reduction_factor - xlen % self.reduction_factor
+        pad = pad % self.reduction_factor
+        pad_shape = [0, 0, 0, pad, 0, 0]
+        xs = nn.functional.pad(xs, pad_shape)
+        xs = xs.reshape(batch_size, -1, self.reduction_factor, hidden_size)
+        xs = xs.mean(dim=-2)
+        return xs
+
+
+class ResLayerNormLSTM(nn.Module):
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 num_layers,
+                 dropout=0,
+                 time_reductions=[1],
+                 reduction_factor=2):
+        super().__init__()
+        self.lstms = nn.ModuleList()
+        self.projs = nn.ModuleList()
+        for i in range(num_layers):
+            self.lstms.append(
+                nn.LSTM(input_size, hidden_size, 1, batch_first=True))
+            proj = [nn.LayerNorm(hidden_size)]
+            if i in time_reductions:
+                proj.append(TimeReduction(reduction_factor))
+            if dropout > 0:
+                proj.append(nn.Dropout(dropout))
+            input_size = hidden_size
+            self.projs.append(nn.Sequential(*proj))
+
+    def forward(self, xs, hiddens=None):
+        if hiddens is None:
+            hiddens = [None for _ in range(len(self.lstms))]
+        else:
+            hs, cs = hiddens[0].unsqueeze(1), hiddens[1].unsqueeze(1)
+            hiddens = zip(hs, cs)
+        new_hiddens = []
+        for lstm, proj, hidden in zip(self.lstms, self.projs, hiddens):
+            lstm.flatten_parameters()
+            xs_next, new_hidden = lstm(xs, hidden)
+            if xs.shape == xs_next.shape:
+                xs_next = xs + xs_next
+            xs = proj(xs_next)
+            new_hiddens.append(new_hidden)
+        hs, cs = zip(*new_hiddens)
+        hs = torch.cat(hs, dim=0)
+        cs = torch.cat(cs, dim=0)
+        return xs, (hs, cs)
+
+
+class Encoder(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout,
+                 proj_size):
+        super().__init__()
+        self.norm = nn.LayerNorm(input_size)
+        self.lstm = ResLayerNormLSTM(
+            input_size, hidden_size, num_layers, dropout=dropout)
         self.proj = nn.Linear(hidden_size, proj_size)
 
     def forward(self, xs, hidden=None):
-        self.lstm.flatten_parameters()
+        xs = self.norm(xs)
         xs, hidden = self.lstm(xs, hidden)
         xs = self.proj(xs)
         return xs, hidden
 
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, hidden_size, num_layers, dropout=0,
-                 proj_size=None):
+    def __init__(self, vocab_embed_size, vocab_size, hidden_size, num_layers,
+                 dropout=0, proj_size=None):
         super().__init__()
-        self.embed = nn.Embedding(vocab_size, hidden_size)
+        self.embed = nn.Embedding(vocab_size, vocab_embed_size)
         self.lstm = nn.LSTM(
-            hidden_size, hidden_size, num_layers,
+            vocab_embed_size, hidden_size, num_layers,
             batch_first=True, dropout=dropout)
         self.proj = nn.Linear(hidden_size, proj_size)
 
@@ -65,10 +123,10 @@ class Joint(nn.Module):
 
 class Transducer(nn.Module):
     def __init__(self,
-                 vocab_size, input_size,
-                 enc_hidden_size, enc_layers, enc_dropout,
-                 dec_hidden_size, dec_layers, dec_dropout,
-                 proj_size, joint_size, blank=NUL):
+                 vocab_embed_size, vocab_size, input_size,
+                 enc_hidden_size, enc_layers, enc_dropout, enc_proj_size,
+                 dec_hidden_size, dec_layers, dec_dropout, dec_proj_size,
+                 joint_size, blank=NUL):
         super().__init__()
         self.blank = blank
         # Encoder
@@ -77,17 +135,18 @@ class Transducer(nn.Module):
             hidden_size=enc_hidden_size,
             num_layers=enc_layers,
             dropout=enc_dropout,
-            proj_size=proj_size)
+            proj_size=enc_proj_size)
         # Decoder
         self.decoder = Decoder(
+            vocab_embed_size=vocab_embed_size,
             vocab_size=vocab_size,
             hidden_size=dec_hidden_size,
             num_layers=dec_layers,
             dropout=dec_dropout,
-            proj_size=proj_size)
+            proj_size=dec_proj_size)
         # Joint
         self.joint = Joint(
-            input_size=proj_size * 2,
+            input_size=enc_proj_size + dec_proj_size,
             hidden_size=joint_size,
             vocab_size=vocab_size)
 

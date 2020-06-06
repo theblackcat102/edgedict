@@ -70,10 +70,10 @@ def convert(args):
     PAUSE_MATCH = re.compile(r'\([0-9]\)')
     NOTATION = re.compile(r'\{[A-Z]*\}')
     print('Converting .sph to wav')
-    splits = ['test', 'train', 'wav']
+    splits = ['test', 'train']
     # splits = ['test']
-    labels = []
     for split in splits:
+        labels = []
         split_dir = os.path.join(args.save_path, 'TEDLIUM_release1', split)
         wav_dir = os.path.join(split_dir, 'wav')
         os.makedirs(wav_dir, exist_ok=True)
