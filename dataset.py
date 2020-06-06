@@ -41,11 +41,11 @@ class AudioDataset(Dataset):
         if os.path.exists(processed_labels):
             data = pickle.load(open(processed_labels, 'rb'))
         else:
-            print(processed_labels)
             data = []
             paths, texts = self.build()
             pairs = list(zip(paths, texts))
             for path, text in tqdm(pairs, dynamic_ncols=True, desc=desc):
+                path = os.path.join(root, path)
                 try:
                     if os.path.exists(path):
                         wave, sr = torchaudio.load(path, normalization=False)
@@ -72,7 +72,7 @@ class AudioDataset(Dataset):
         if reverse_sorted_by_length:
             self.data = sorted(
                 self.data, key=lambda x: x['audio_length'], reverse=True)
-
+        # print(root, data[0]['path'])
         self.transforms = transforms
         self.tokenizer = tokenizer
 
@@ -154,8 +154,11 @@ class Librispeech(AudioDataset):
         texts = []
         trans_files = list(glob.glob(os.path.join(self.root, '*/*/*.txt')))
         for trans_file in trans_files:
+            dir2 = os.path.dirname(trans_file)
+            dir1 = os.path.dirname(dir2)
+            dir_path = os.path.join(
+                os.path.basename(dir1), os.path.basename(dir2))
             with open(trans_file, 'r') as f:
-                dir_path = os.path.dirname(os.path.realpath(trans_file))
                 for line in f.readlines():
                     filename, text = line.split(maxsplit=1)
                     path = os.path.join(dir_path, filename + '.flac')
@@ -228,11 +231,11 @@ if __name__ == "__main__":
                 tokenizer=tokenizer,
                 transforms=transform,
                 audio_max_length=14),
-            TEDLIUM(
-                root="./data/TEDLIUM_release-3/data",
-                tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+            # TEDLIUM(
+            #     root="./data/TEDLIUM_release-3/data",
+            #     tokenizer=tokenizer,
+            #     transforms=transform,
+            #     audio_max_length=14),
             TEDLIUM(
                 root="./data/TEDLIUM_release1/train",
                 tokenizer=tokenizer,
@@ -262,7 +265,8 @@ if __name__ == "__main__":
                 root='./data/common_voice', labels='test.tsv',
                 tokenizer=tokenizer,
                 transforms=transform,
-                audio_max_length=14)]),
+                audio_max_length=14)
+        ]),
         batch_size=4, shuffle=False, num_workers=4,
         collate_fn=seq_collate)
 
