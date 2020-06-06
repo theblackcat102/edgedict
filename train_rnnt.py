@@ -25,15 +25,15 @@ flags.DEFINE_string('name', 'rnn-t-v3', help='session name')
 flags.DEFINE_string('eval_model', None, help='evaluate and exit')
 flags.DEFINE_string('resume_from', None, help='resume from checkpoint')
 # dataset
-flags.DEFine_string('LibriSpeech_train', "./data/LibriSpeech/train-clean-360",
+flags.DEFINE_string('LibriSpeech_train', "./data/LibriSpeech/train-clean-360",
                     help='LibriSpeech train')
-flags.DEFine_string('LibriSpeech_test', "./data/LibriSpeech/test-clean",
+flags.DEFINE_string('LibriSpeech_test', "./data/LibriSpeech/test-clean",
                     help='LibriSpeech test')
-flags.DEFine_string('TEDLIUM_train', "./data/TEDLIUM_release-3/data",
+flags.DEFINE_string('TEDLIUM_train', "./data/TEDLIUM_release-3/data",
                     help='TEDLIUM 3 train')
-flags.DEFine_string('TEDLIUM_test', "./data/TEDLIUM_release1/test",
+flags.DEFINE_string('TEDLIUM_test', "./data/TEDLIUM_release1/test",
                     help='TEDLIUM 1 test')
-flags.DEFine_string('CommonVoice', "./data/common_voice",
+flags.DEFINE_string('CommonVoice', "./data/common_voice",
                     help='common voice')
 # learning
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
@@ -167,11 +167,12 @@ class Trainer:
                 #     tokenizer=self.tokenizer,
                 #     transforms=transform,
                 #     audio_max_length=FLAGS.audio_max_length),
-                CommonVoice(
-                    root=FLAGS.CommonVoice, labels='train.tsv',
-                    tokenizer=self.tokenizer,
-                    transforms=transform,
-                    audio_max_length=FLAGS.audio_max_length)]),
+                # CommonVoice(
+                #     root=FLAGS.CommonVoice, labels='train.tsv',
+                #     tokenizer=self.tokenizer,
+                #     transforms=transform,
+                #     audio_max_length=FLAGS.audio_max_length)
+            ]),
             batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
             collate_fn=seq_collate, drop_last=True)
 
@@ -215,8 +216,6 @@ class Trainer:
         if FLAGS.sched:
             self.sched = optim.lr_scheduler.ReduceLROnPlateau(
                 self.optim, patience=1, factor=0.5, min_lr=1e-6, verbose=1)
-        # self.warmup_sched = optim.lr_scheduler.LambdaLR(
-        #     self.optim, lambda step: (step + 1) / FLAGS.warmup_step)
         # Loss
         self.loss_fn = RNNTLoss(blank=NUL)
         # Apex
@@ -238,9 +237,9 @@ class Trainer:
         steps = len(self.dataloader_train) * FLAGS.epochs
         with trange(1, steps + 1, dynamic_ncols=True) as pbar:
             for step in pbar:
-                # if step <= FLAGS.warmup_step:
-                #     scale = step / FLAGS.warmup_step
-                #     self.optim.param_groups[0]['lr'] = FLAGS.lr * scale
+                if step <= FLAGS.warmup_step:
+                    scale = step / FLAGS.warmup_step
+                    self.optim.param_groups[0]['lr'] = FLAGS.lr * scale
                 batch, epoch = next(looper)
                 loss = self.train_step(batch)
                 losses.append(loss)

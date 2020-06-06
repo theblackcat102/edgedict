@@ -5,3 +5,4 @@ tensorboardX
 tensorflow
 tokenizers
 tqdm
+ipython
