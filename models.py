@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+from warprnnt_pytorch import RNNTLoss
 
 from tokenizer import NUL, BOS
 
@@ -149,12 +150,24 @@ class Transducer(nn.Module):
             input_size=enc_proj_size + dec_proj_size,
             hidden_size=joint_size,
             vocab_size=vocab_size)
+        self.loss_fn = RNNTLoss(blank=blank)
 
-    def forward(self, xs, ys):
+    def scale_length(self, logits, xlen):
+        scale = (xlen.max().float() / logits.shape[1]).ceil()
+        xlen = (xlen / scale).ceil().int()
+        return xlen
+
+    def forward(self, xs, ys, xlen, ylen):
+        xs = xs[:, :xlen.max()].contiguous()
+        ys = ys[:, :ylen.max()].contiguous()
+
         h_enc, _ = self.encoder(xs)
         h_dec, _ = self.decoder(ys)
         logits = self.joint(h_enc, h_dec)
-        return logits
+        xlen = self.scale_length(logits, xlen)
+        loss = self.loss_fn(logits, ys, xlen, ylen)
+
+        return loss
 
     def greedy_decode(self, xs, xlen):
         # encoder

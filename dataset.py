@@ -231,11 +231,11 @@ if __name__ == "__main__":
                 tokenizer=tokenizer,
                 transforms=transform,
                 audio_max_length=14),
-            # TEDLIUM(
-            #     root="./data/TEDLIUM_release-3/data",
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14),
+            TEDLIUM(
+                root="./data/TEDLIUM_release-3/data",
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
             TEDLIUM(
                 root="./data/TEDLIUM_release1/train",
                 tokenizer=tokenizer,
@@ -259,21 +259,22 @@ if __name__ == "__main__":
             TEDLIUM(
                 root='./data/TEDLIUM_release1/test',
                 tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+                transforms=transform),
             CommonVoice(
                 root='./data/common_voice', labels='test.tsv',
                 tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14)
+                transforms=transform)
         ]),
         batch_size=4, shuffle=False, num_workers=4,
         collate_fn=seq_collate)
 
     tokenizer.build(train_dataloader.dataset.texts())
 
-    xs, ys, xlen, ylen = next(iter(train_dataloader))
-    print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    from tqdm import tqdm
+    for xs, ys, xlen, ylen in tqdm(train_dataloader):
+        pass
+        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
-    xs, ys, xlen, ylen = next(iter(val_dataloader))
-    print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    for xs, ys, xlen, ylen in tqdm(val_dataloader):
+        pass
+        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)

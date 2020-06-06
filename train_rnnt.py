@@ -39,7 +39,7 @@ flags.DEFINE_string('CommonVoice', "./data/common_voice",
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
 flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')
-flags.DEFINE_integer('warmup_step', 1, help='linearly warmup lr')
+flags.DEFINE_integer('warmup_step', 10000, help='linearly warmup lr')
 flags.DEFINE_integer('epochs', 30, help='epoch')
 flags.DEFINE_integer('batch_size', 8, help='batch size')
 flags.DEFINE_integer('sub_batch_size', 8, help='accumulate batch size')
@@ -277,9 +277,14 @@ class Trainer:
         for sub_batch_idx, start_idx in enumerate(start_idxs):
             sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
             xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
-            prob = self.model(xs, ys)
-            xlen = self.scale_length(prob, xlen)
-            loss = self.loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
+            xs = xs[:, :xlen.max()].contiguous()
+            ys = ys[:, :ylen.max()].contiguous()
+            # prob = self.model(xs, ys)
+            # xlen = self.scale_length(prob, xlen)
+            # loss = self.loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
+            loss = self.model(xs, ys, xlen, ylen)
+            if FLAGS.multi_gpu:
+                loss = loss.mean() / len(start_idxs)
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
@@ -304,37 +309,39 @@ class Trainer:
 
     def evaluate(self):
         self.model.eval()
-        wer = []
+        wers = []
         losses = []
         pred_seqs = []
         true_seqs = []
         with torch.no_grad():
             with tqdm(self.dataloader_val, dynamic_ncols=True) as pbar:
                 for batch in pbar:
-                    xs, ys, xlen, ylen = [x.to(device) for x in batch]
-                    xs = xs[:, :xlen.max()]
-                    ys = ys[:, :ylen.max()].contiguous()
-                    prob = self.model(xs, ys)
-                    xlen = self.scale_length(prob, xlen)
-                    loss = self.loss_fn(prob, ys, xlen, ylen)
-                    losses.append(loss.item())
-
-                    xs = xs.to(device)
-                    if FLAGS.multi_gpu:
-                        ys_hat, nll = self.model.module.greedy_decode(xs, xlen)
-                    else:
-                        ys_hat, nll = self.model.greedy_decode(xs, xlen)
-                    pred_seq = self.tokenizer.decode_plus(ys_hat)
-                    true_seq = self.tokenizer.decode_plus(ys.cpu().numpy())
-                    wer.append(jiwer.wer(true_seq, pred_seq))
-                    pbar.set_description('wer: %.4f' % wer[-1])
+                    loss, wer, pred_seq, true_seq = self.evaluate_step(batch)
+                    wers.append(wer)
                     sample_nums = FLAGS.sample_size - len(pred_seqs)
                     pred_seqs.extend(pred_seq[:sample_nums])
                     true_seqs.extend(true_seq[:sample_nums])
+                    pbar.set_description('wer: %.4f' % wer)
         loss = np.mean(losses)
-        wer = np.mean(wer)
+        wer = np.mean(wers)
         self.model.train()
         return loss, wer, pred_seqs, true_seqs
+
+    def evaluate_step(self, batch):
+        xs, ys, xlen, ylen = [x.to(device) for x in batch]
+        xs = xs[:, :xlen.max()]
+        ys = ys[:, :ylen.max()].contiguous()
+        loss = self.model(xs, ys, xlen, ylen)
+        if FLAGS.multi_gpu:
+            loss = loss.mean()
+        if FLAGS.multi_gpu:
+            ys_hat, nll = self.model.module.greedy_decode(xs, xlen)
+        else:
+            ys_hat, nll = self.model.greedy_decode(xs, xlen)
+        pred_seq = self.tokenizer.decode_plus(ys_hat)
+        true_seq = self.tokenizer.decode_plus(ys.cpu().numpy())
+        wer = jiwer.wer(true_seq, pred_seq)
+        return loss.item(), wer, pred_seq, true_seq
 
     def save(self, step):
         checkpoint = {'optim': self.optim.state_dict()}
@@ -370,12 +377,8 @@ class Trainer:
 
     def sanity_check(self):
         self.model.eval()
-        with torch.no_grad():
-            batch = next(iter(self.dataloader_val))
-            xs, ys, xlen, ylen = [x.to(device) for x in batch]
-            prob = self.model(xs, ys)
-            xlen = self.scale_length(prob, xlen)
-            self.loss_fn(prob, ys, xlen, ylen)
+        batch = next(iter(self.dataloader_val))
+        self.evaluate_step(batch)
         self.model.train()
 
 
