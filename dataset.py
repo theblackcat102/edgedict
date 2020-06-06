@@ -178,7 +178,7 @@ class TEDLIUM(AudioDataset):
         with open(os.path.join(self.root, 'wav', 'labels.txt')) as f:
             for line in f:
                 filename, text = line.split(maxsplit=1)
-                path = os.path.join(self.root, 'wav', filename)
+                path = os.path.join('wav', filename)
                 paths.append(path)
                 texts.append(text)
         return paths, texts
@@ -207,49 +207,69 @@ if __name__ == "__main__":
     transform = torch.nn.Sequential(
         # transforms.MelSpectrogram(n_mels=40),
         transforms.MFCC(
-            n_mfcc=40,
+            n_mfcc=80,
             melkwargs={
-                'n_fft': 512,
+                'n_fft': 400,
                 'win_length': 400,
-                'hop_length': 160}),
+                'hop_length': 200,
+                'f_min': 20,
+                'f_max': 5800
+            }),
         mtransforms.Transpose(),
-        # mtransforms.CatDeltas(),
-        # mtransforms.CMVN(),
-        # mtransforms.Downsample(3)
-    )
-    transform = torch.nn.Sequential(
-        mtransforms.KaldiMFCC(num_mel_bins=40, num_ceps=40),
-        # mtransforms.CatDeltas(),
-        # mtransforms.CMVN(),
-        # mtransforms.Downsample(3)
+        mtransforms.CatDeltas(),
+        mtransforms.CMVN(),
+        mtransforms.Downsample(3)
     )
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                '../LibriSpeech/train-clean-360/',
+                root='./data/LibriSpeech/train-clean-360',
                 tokenizer=tokenizer,
                 transforms=transform,
-                audio_max_length=14)]),
+                audio_max_length=14),
+            TEDLIUM(
+                root="./data/TEDLIUM_release-3/data",
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
+            TEDLIUM(
+                root="./data/TEDLIUM_release1/train",
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
+            CommonVoice(
+                root='./data/common_voice', labels='train.tsv',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14)
+        ]),
         batch_size=4, shuffle=True, num_workers=4,
         collate_fn=seq_collate, drop_last=True)
 
     val_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                '../LibriSpeech/test-clean/',
+                './data/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
-                transforms=transform)]),
+                transforms=transform),
+            TEDLIUM(
+                root='./data/TEDLIUM_release1/test',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
+            CommonVoice(
+                root='./data/common_voice', labels='test.tsv',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14)]),
         batch_size=4, shuffle=False, num_workers=4,
         collate_fn=seq_collate)
 
     tokenizer.build(train_dataloader.dataset.texts())
 
-    from tqdm import tqdm
-    for batch in tqdm(train_dataloader):
-        xs, ys, xlen, ylen = batch
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
-        # print(xs.sum(dim=-1))
+    xs, ys, xlen, ylen = next(iter(train_dataloader))
+    print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
     xs, ys, xlen, ylen = next(iter(val_dataloader))
     print(xs.shape, ys.shape, xlen.shape, ylen.shape)

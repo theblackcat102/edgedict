@@ -29,12 +29,10 @@ flags.DEFine_string('LibriSpeech_train', "./data/LibriSpeech/train-clean-360",
                     help='LibriSpeech train')
 flags.DEFine_string('LibriSpeech_test', "./data/LibriSpeech/test-clean",
                     help='LibriSpeech test')
-flags.DEFine_string('TEDLIUM_train1', "./data/TEDLIUM_release1/train",
-                    help='TEDLIUM 1 train')
-flags.DEFine_string('TEDLIUM_test1', "./data/TEDLIUM_release1/test",
-                    help='TEDLIUM 1 test')
-flags.DEFine_string('TEDLIUM_train3', "./data/TEDLIUM_release-3/data",
+flags.DEFine_string('TEDLIUM_train', "./data/TEDLIUM_release-3/data",
                     help='TEDLIUM 3 train')
+flags.DEFine_string('TEDLIUM_test', "./data/TEDLIUM_release1/test",
+                    help='TEDLIUM 1 test')
 flags.DEFine_string('CommonVoice', "./data/common_voice",
                     help='common voice')
 # learning

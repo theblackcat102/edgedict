@@ -88,11 +88,14 @@ def convert(args):
                     name = tokens[0]
                     text = line.split('male> ')[-1]
                     text = text.split('unknown> ')[-1]
+                    text = text.split('NA> ')[-1]
                     text = text.replace('<sil>', '')
+                    text = text.replace('<unk>', '')
                     text = text.split('('+name)[0]
                     text = PAUSE_MATCH.sub('', text)
                     text = NOTATION.sub('', text)
                     text = text.strip()
+                    text = ' '.join(text.split())
 
                     wav_filename = '%s_%d.wav' % (name, idx)
                     assert ' ' not in wav_filename
