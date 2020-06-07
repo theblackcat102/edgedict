@@ -44,19 +44,21 @@ class AudioDataset(Dataset):
             data = []
             paths, texts = self.build()
             pairs = list(zip(paths, texts))
-            for path, text in tqdm(pairs, dynamic_ncols=True, desc=desc):
-                path = os.path.join(root, path)
-                try:
-                    if os.path.exists(path):
-                        wave, sr = torchaudio.load(path, normalization=False)
-                        if sr == sampling_rate:
-                            audio_length = len(wave[0]) // sr
-                            data.append({
-                                'path': path,
-                                'text': text,
-                                'audio_length': audio_length})
-                except RuntimeError:
-                    continue
+            with tqdm(pairs, dynamic_ncols=True, desc=desc) as pbar:
+                for path, text in pbar:
+                    full_path = os.path.join(root, path)
+                    try:
+                        if os.path.exists(full_path):
+                            wave, sr = torchaudio.load(
+                                full_path, normalization=False)
+                            if sr == sampling_rate:
+                                audio_length = len(wave[0]) // sr
+                                data.append({
+                                    'path': path,
+                                    'text': text,
+                                    'audio_length': audio_length})
+                    except RuntimeError:
+                        pbar.write('Fail to load %s' % full_path)
             pickle.dump(data, open(processed_labels, 'wb'))
 
         total_secs = 0
@@ -88,7 +90,11 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         path = os.path.join(self.root, self.data[idx]['path'])
-        data, sr = torchaudio.load(path, normalization=True)
+        try:
+            data, sr = torchaudio.load(path, normalization=True)
+        except Exception:
+            print("Failt to load %s, closed" % path)
+            exit(0)
         data = self.transforms(data[:1])
 
         texts = self.data[idx]['text']
@@ -136,7 +142,7 @@ class CommonVoice(AudioDataset):
         df = df.T.to_dict().values()
         for voice in df:
             filename = voice['path'].replace('.mp3', '.wav')
-            path = os.path.join(self.root, 'clips', filename)
+            path = os.path.join('clips', filename)
             paths.append(path)
             texts.append(voice['sentence'])
         return paths, texts
@@ -226,21 +232,21 @@ if __name__ == "__main__":
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
-            Librispeech(
-                root='./data/LibriSpeech/train-clean-360',
-                tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
-            TEDLIUM(
-                root="./data/TEDLIUM_release-3/data",
-                tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
-            TEDLIUM(
-                root="./data/TEDLIUM_release1/train",
-                tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+            # Librispeech(
+            #     root='./data/LibriSpeech/train-clean-360',
+            #     tokenizer=tokenizer,
+            #     transforms=transform,
+            #     audio_max_length=14),
+            # TEDLIUM(
+            #     root="./data/TEDLIUM_release-3/data",
+            #     tokenizer=tokenizer,
+            #     transforms=transform,
+            #     audio_max_length=14),
+            # TEDLIUM(
+            #     root="./data/TEDLIUM_release1/train",
+            #     tokenizer=tokenizer,
+            #     transforms=transform,
+            #     audio_max_length=14),
             CommonVoice(
                 root='./data/common_voice', labels='train.tsv',
                 tokenizer=tokenizer,
@@ -252,14 +258,14 @@ if __name__ == "__main__":
 
     val_dataloader = DataLoader(
         dataset=MergedDataset([
-            Librispeech(
-                './data/LibriSpeech/test-clean',
-                tokenizer=tokenizer,
-                transforms=transform),
-            TEDLIUM(
-                root='./data/TEDLIUM_release1/test',
-                tokenizer=tokenizer,
-                transforms=transform),
+            # Librispeech(
+            #     './data/LibriSpeech/test-clean',
+            #     tokenizer=tokenizer,
+            #     transforms=transform),
+            # TEDLIUM(
+            #     root='./data/TEDLIUM_release1/test',
+            #     tokenizer=tokenizer,
+            #     transforms=transform),
             CommonVoice(
                 root='./data/common_voice', labels='test.tsv',
                 tokenizer=tokenizer,
@@ -269,7 +275,7 @@ if __name__ == "__main__":
         collate_fn=seq_collate)
 
     tokenizer.build(train_dataloader.dataset.texts())
-
+    print("==========================")
     from tqdm import tqdm
     for xs, ys, xlen, ylen in tqdm(train_dataloader):
         pass

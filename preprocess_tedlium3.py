@@ -54,13 +54,11 @@ def download(args):
 # Extract zip files
 # ========== ===========
 def extract(args):
-    files = glob.glob('%s/*.tar.gz' % args.save_path)
-
-    for fname in files:
-        print('Extracting %s' % fname)
-        tar = tarfile.open(fname, "r:gz")
-        tar.extractall(path=args.save_path)
-        tar.close()
+    fname = '%s/TEDLIUM_release-3.tgz' % args.save_path
+    print('Extracting %s' % fname)
+    tar = tarfile.open(fname, "r:gz")
+    tar.extractall(path=args.save_path)
+    tar.close()
 
 
 # ========== ===========
@@ -76,7 +74,8 @@ def convert(args):
     root = os.path.join(args.save_path, 'TEDLIUM_release-3', 'data')
     wav_dir = os.path.join(root, 'wav')
     os.makedirs(wav_dir, exist_ok=True)
-    sph_files = list(glob.glob(os.path.join(root, 'sph/*.sph')))
+    sph_files = sorted(
+        list(glob.glob(os.path.join(root, 'sph/*.sph'))))
     with tqdm(sph_files, dynamic_ncols=True, desc="data") as pbar:
         for sph_file in pbar:
             sph = SPHFile(sph_file)
