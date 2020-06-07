@@ -39,6 +39,9 @@ flags.DEFINE_string('CommonVoice', "./data/common_voice",
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
 flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')
+flags.DEFINE_integer('sched_patience', 1, help='lr reduce rate on plateau')
+flags.DEFINE_float('sched_factor', 0.5, help='lr reduce rate on plateau')
+flags.DEFINE_float('sched_min_lr', 1e-6, help='lr reduce rate on plateau')
 flags.DEFINE_integer('warmup_step', 10000, help='linearly warmup lr')
 flags.DEFINE_integer('epochs', 30, help='epoch')
 flags.DEFINE_integer('batch_size', 8, help='batch size')
@@ -215,7 +218,9 @@ class Trainer:
         # Scheduler
         if FLAGS.sched:
             self.sched = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optim, patience=1, factor=0.5, min_lr=1e-6, verbose=1)
+                self.optim, patience=FLAGS.sched_patience,
+                factor=FLAGS.sched_factor, min_lr=FLAGS.sched_min_lr,
+                verbose=1)
         # Loss
         self.loss_fn = RNNTLoss(blank=NUL)
         # Apex
