@@ -318,6 +318,7 @@ class Trainer:
                 for batch in pbar:
                     loss, wer, pred_seq, true_seq = self.evaluate_step(batch)
                     wers.append(wer)
+                    losses.append(loss)
                     sample_nums = FLAGS.sample_size - len(pred_seqs)
                     pred_seqs.extend(pred_seq[:sample_nums])
                     true_seqs.extend(true_seq[:sample_nums])
