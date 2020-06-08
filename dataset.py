@@ -272,18 +272,18 @@ if __name__ == "__main__":
                 './data/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transforms=transform),
-            Librispeech(
-                './data/LibriSpeech/dev-clean',
-                tokenizer=tokenizer,
-                transforms=transform),
-            Librispeech(
-                './data/LibriSpeech/test-other',
-                tokenizer=tokenizer,
-                transforms=transform),
-            Librispeech(
-                './data/LibriSpeech/dev-other',
-                tokenizer=tokenizer,
-                transforms=transform),
+            # Librispeech(
+            #     './data/LibriSpeech/dev-clean',
+            #     tokenizer=tokenizer,
+            #     transforms=transform),
+            # Librispeech(
+            #     './data/LibriSpeech/test-other',
+            #     tokenizer=tokenizer,
+            #     transforms=transform),
+            # Librispeech(
+            #     './data/LibriSpeech/dev-other',
+            #     tokenizer=tokenizer,
+            #     transforms=transform),
             # TEDLIUM(
             #     root='./data/TEDLIUM_release1/test',
             #     tokenizer=tokenizer,
@@ -301,7 +301,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
     for xs, ys, xlen, ylen in tqdm(train_dataloader):
         pass
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+        print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
     for xs, ys, xlen, ylen in tqdm(val_dataloader):
         pass

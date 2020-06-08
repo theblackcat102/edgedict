@@ -76,8 +76,10 @@ flags.DEFINE_integer('hop_length', 200, help='spectrogram')
 flags.DEFINE_bool('delta', False, help='concat delta and detal of dealt')
 flags.DEFINE_bool('cmvn', False, help='normalize spectrogram')
 flags.DEFINE_integer('downsample', 3, help='downsample audio feature')
-flags.DEFINE_integer('mask_T', 100, help='downsample audio feature')
-flags.DEFINE_integer('mask_F', 27, help='downsample audio feature')
+flags.DEFINE_integer('T_mask', 50, help='downsample audio feature')
+flags.DEFINE_integer('T_num_mask', 2, help='downsample audio feature')
+flags.DEFINE_integer('F_mask', 5, help='downsample audio feature')
+flags.DEFINE_integer('F_num_mask', 1, help='downsample audio feature')
 # apex
 flags.DEFINE_bool('apex', default=True, help='fp16 training')
 flags.DEFINE_string('opt_level', 'O1', help='use mix precision')
@@ -128,10 +130,10 @@ def get_transform(mode):
     if FLAGS.downsample > 1:
         transform.append(Downsample(FLAGS.downsample))
         input_size = input_size * FLAGS.downsample
-    if mode == 'train' and FLAGS.mask_T > 0:
-        transform.append(TimeMask(FLAGS.mask_T))
-    if mode == 'train' and FLAGS.mask_F > 0:
-        transform.append(FrequencyMask(FLAGS.mask_F))
+    if mode == 'train' and FLAGS.T_mask > 0:
+        transform.append(TimeMask(FLAGS.T_mask, FLAGS.T_num_mask))
+    if mode == 'train' and FLAGS.F_mask > 0:
+        transform.append(FrequencyMask(FLAGS.F_mask, FLAGS.F_num_mask))
     transform = torch.nn.Sequential(*transform)
     return transform, input_size
 
@@ -183,16 +185,16 @@ class Trainer:
                     tokenizer=self.tokenizer,
                     transforms=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
-                # TEDLIUM(
-                #     root=FLAGS.TEDLIUM_train,
-                #     tokenizer=self.tokenizer,
-                #     transforms=transform_train,
-                #     audio_max_length=FLAGS.audio_max_length),
-                # CommonVoice(
-                #     root=FLAGS.CommonVoice, labels='train.tsv',
-                #     tokenizer=self.tokenizer,
-                #     transforms=transform_train,
-                #     audio_max_length=FLAGS.audio_max_length)
+                TEDLIUM(
+                    root=FLAGS.TEDLIUM_train,
+                    tokenizer=self.tokenizer,
+                    transforms=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                CommonVoice(
+                    root=FLAGS.CommonVoice, labels='train.tsv',
+                    tokenizer=self.tokenizer,
+                    transforms=transform_train,
+                    audio_max_length=FLAGS.audio_max_length)
             ]),
             batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
             collate_fn=seq_collate, drop_last=True)

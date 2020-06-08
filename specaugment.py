@@ -14,9 +14,10 @@ class FrequencyMask(torch.nn.Module):
 
     """
 
-    def __init__(self, max_width, use_mean=True):
+    def __init__(self, max_width, num_masks, use_mean=True):
         super().__init__()
         self.max_width = max_width
+        self.num_masks = num_masks
         self.use_mean = use_mean
 
     def forward(self, tensor):
@@ -27,12 +28,14 @@ class FrequencyMask(torch.nn.Module):
         Returns:
             Tensor: Transformed image with Frequency Mask.
         """
-        start = random.randrange(0, tensor.shape[1])
-        end = start + random.randrange(0, self.max_width)
         if self.use_mean:
-            tensor[:, start:end] = tensor.mean()
+            fill_value = tensor.mean()
         else:
-            tensor[:, start:end] = 0
+            fill_value = 0
+        for _ in range(self.num_masks):
+            start = random.randrange(0, tensor.shape[1])
+            end = start + random.randrange(0, self.max_width)
+            tensor[:, start:end] = fill_value
         return tensor
 
     def __repr__(self):
@@ -53,9 +56,10 @@ class TimeMask(torch.nn.Module):
 
     """
 
-    def __init__(self, max_width, use_mean=True):
+    def __init__(self, max_width, num_masks, use_mean=True):
         super().__init__()
         self.max_width = max_width
+        self.num_masks = num_masks
         self.use_mean = use_mean
 
     def forward(self, tensor):
@@ -66,12 +70,14 @@ class TimeMask(torch.nn.Module):
         Returns:
             Tensor: Transformed image with Time Mask.
         """
-        start = random.randrange(0, tensor.shape[0])
-        end = start + random.randrange(0, self.max_width)
         if self.use_mean:
-            tensor[start:end, :] = tensor.mean()
+            fill_value = tensor.mean()
         else:
-            tensor[start:end, :] = 0
+            fill_value = 0
+        for _ in range(self.num_masks):
+            start = random.randrange(0, tensor.shape[0])
+            end = start + random.randrange(0, self.max_width)
+            tensor[start:end, :] = fill_value
         return tensor
 
     def __repr__(self):
