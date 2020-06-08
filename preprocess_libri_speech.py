@@ -36,35 +36,40 @@ def md5(fname):
 # ========== ===========
 def download(args):
     files = [
+        # (
+        #     'dev-clean.tar.gz',
+        #     'http://www.openslr.org/resources/12/dev-clean.tar.gz',
+        #     '42e2234ba48799c1f50f24a7926300a1'
+        # ),
+        # (
+        #     'dev-other.tar.gz',
+        #     'http://www.openslr.org/resources/12/dev-other.tar.gz',
+        #     'c8d0bcc9cca99d4f8b62fcc847357931'
+        # ),
+        # (
+        #     'test-clean.tar.gz',
+        #     'http://www.openslr.org/resources/12/test-clean.tar.gz',
+        #     '32fa31d27d2e1cad72775fee3f4849a9'
+        # ),
+        # (
+        #     'test-other.tar.gz',
+        #     'http://www.openslr.org/resources/12/test-other.tar.gz',
+        #     'fb5a50374b501bb3bac4815ee91d3135'
+        # ),
+        # (
+        #     'train-clean-100.tar.gz',
+        #     'http://www.openslr.org/resources/12/train-clean-100.tar.gz',
+        #     '2a93770f6d5c6c964bc36631d331a522',
+        # ),
+        # (
+        #     'train-clean-360.tar.gz',
+        #     'http://www.openslr.org/resources/12/train-clean-360.tar.gz',
+        #     'c0e676e450a7ff2f54aeade5171606fa',
+        # ),
         (
-            'dev-clean.tar.gz',
-            'http://www.openslr.org/resources/12/dev-clean.tar.gz',
-            '42e2234ba48799c1f50f24a7926300a1'
-        ),
-        (
-            'dev-other.tar.gz',
-            'http://www.openslr.org/resources/12/dev-other.tar.gz',
-            'c8d0bcc9cca99d4f8b62fcc847357931'
-        ),
-        (
-            'test-clean.tar.gz',
-            'http://www.openslr.org/resources/12/test-clean.tar.gz',
-            '32fa31d27d2e1cad72775fee3f4849a9'
-        ),
-        (
-            'test-other.tar.gz',
-            'http://www.openslr.org/resources/12/test-other.tar.gz',
-            'fb5a50374b501bb3bac4815ee91d3135'
-        ),
-        (
-            'train-clean-100.tar.gz',
-            'http://www.openslr.org/resources/12/train-clean-100.tar.gz',
-            '2a93770f6d5c6c964bc36631d331a522',
-        ),
-        (
-            'train-clean-360.tar.gz',
-            'http://www.openslr.org/resources/12/train-clean-360.tar.gz',
-            'c0e676e450a7ff2f54aeade5171606fa',
+            'train-other-500.tar.gz',
+            'http://www.openslr.org/resources/12/train-other-500.tar.gz',
+            'd1a0fd59409feb2c614ce4d30c387708',
         )
     ]
     for name, url, md5gt in files:

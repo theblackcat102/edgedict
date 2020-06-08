@@ -232,11 +232,21 @@ if __name__ == "__main__":
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
-            # Librispeech(
-            #     root='./data/LibriSpeech/train-clean-360',
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14),
+            Librispeech(
+                root='./data/LibriSpeech/train-other-500',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
+            Librispeech(
+                root='./data/LibriSpeech/train-clean-360',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
+            Librispeech(
+                root='./data/LibriSpeech/train-clean-100',
+                tokenizer=tokenizer,
+                transforms=transform,
+                audio_max_length=14),
             # TEDLIUM(
             #     root="./data/TEDLIUM_release-3/data",
             #     tokenizer=tokenizer,
@@ -247,29 +257,41 @@ if __name__ == "__main__":
             #     tokenizer=tokenizer,
             #     transforms=transform,
             #     audio_max_length=14),
-            CommonVoice(
-                root='./data/common_voice', labels='train.tsv',
-                tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14)
+            # CommonVoice(
+            #     root='./data/common_voice', labels='train.tsv',
+            #     tokenizer=tokenizer,
+            #     transforms=transform,
+            #     audio_max_length=14)
         ]),
         batch_size=4, shuffle=True, num_workers=4,
         collate_fn=seq_collate, drop_last=True)
 
     val_dataloader = DataLoader(
         dataset=MergedDataset([
-            # Librispeech(
-            #     './data/LibriSpeech/test-clean',
-            #     tokenizer=tokenizer,
-            #     transforms=transform),
+            Librispeech(
+                './data/LibriSpeech/test-clean',
+                tokenizer=tokenizer,
+                transforms=transform),
+            Librispeech(
+                './data/LibriSpeech/dev-clean',
+                tokenizer=tokenizer,
+                transforms=transform),
+            Librispeech(
+                './data/LibriSpeech/test-other',
+                tokenizer=tokenizer,
+                transforms=transform),
+            Librispeech(
+                './data/LibriSpeech/dev-other',
+                tokenizer=tokenizer,
+                transforms=transform),
             # TEDLIUM(
             #     root='./data/TEDLIUM_release1/test',
             #     tokenizer=tokenizer,
             #     transforms=transform),
-            CommonVoice(
-                root='./data/common_voice', labels='test.tsv',
-                tokenizer=tokenizer,
-                transforms=transform)
+            # CommonVoice(
+            #     root='./data/common_voice', labels='test.tsv',
+            #     tokenizer=tokenizer,
+            #     transforms=transform)
         ]),
         batch_size=4, shuffle=False, num_workers=4,
         collate_fn=seq_collate)

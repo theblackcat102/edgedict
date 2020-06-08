@@ -16,6 +16,7 @@ from warprnnt_pytorch import RNNTLoss
 from dataset import (
     seq_collate, MergedDataset, Librispeech, TEDLIUM, CommonVoice)
 from models import Transducer
+from specaugment import TimeMask, FrequencyMask
 from transforms import CatDeltas, CMVN, Downsample, Transpose
 from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 
@@ -61,6 +62,10 @@ flags.DEFINE_integer('dec_proj_size', 150, help='encoder layers')
 # joint
 flags.DEFINE_integer('proj_size', 320, help='RNN hidden dimension')
 flags.DEFINE_integer('joint_size', 512, help='RNN hidden dimension')
+# tokenizer
+flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
+flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
+flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
 flags.DEFINE_integer('audio_max_length', 14, help='max length in seconds')
 flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec'], help='audio feature')
@@ -71,9 +76,8 @@ flags.DEFINE_integer('hop_length', 200, help='spectrogram')
 flags.DEFINE_bool('delta', False, help='concat delta and detal of dealt')
 flags.DEFINE_bool('cmvn', False, help='normalize spectrogram')
 flags.DEFINE_integer('downsample', 3, help='downsample audio feature')
-flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
-flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
-flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
+flags.DEFINE_integer('mask_T', 100, help='downsample audio feature')
+flags.DEFINE_integer('mask_F', 27, help='downsample audio feature')
 # apex
 flags.DEFINE_bool('apex', default=True, help='fp16 training')
 flags.DEFINE_string('opt_level', 'O1', help='use mix precision')
@@ -95,7 +99,7 @@ def infloop(dataloader):
         epoch += 1
 
 
-def get_transform():
+def get_transform(mode):
     # Transform
     feature_args = {
         'n_fft': FLAGS.n_fft,
@@ -104,19 +108,18 @@ def get_transform():
         'f_min': 20,
         'f_max': 5800,
     }
-    if FLAGS.feature == 'mfcc':
-        transform = [
-            transforms.MFCC(
-                log_mels=True,
-                n_mfcc=FLAGS.feature_size,
-                melkwargs=feature_args),
-            Transpose()]
-    elif FLAGS.feature == 'melspec':
-        transform = [
-            transforms.MelSpectrogram(
-                n_mels=FLAGS.feature_size, **feature_args),
-            Transpose()]
+    transform = []
     input_size = FLAGS.feature_size
+    # feature extraction
+    if FLAGS.feature == 'mfcc':
+        transform.append(transforms.MFCC(
+            log_mels=True,
+            n_mfcc=FLAGS.feature_size,
+            melkwargs=feature_args))
+    if FLAGS.feature == 'melspec':
+        transform.append(transforms.MelSpectrogram(
+            n_mels=FLAGS.feature_size, **feature_args))
+    transform.append(Transpose())
     if FLAGS.delta:
         transform.append(CatDeltas())
         input_size = input_size * 3
@@ -125,6 +128,10 @@ def get_transform():
     if FLAGS.downsample > 1:
         transform.append(Downsample(FLAGS.downsample))
         input_size = input_size * FLAGS.downsample
+    if mode == 'train' and FLAGS.mask_T > 0:
+        transform.append(TimeMask(FLAGS.mask_T))
+    if mode == 'train' and FLAGS.mask_F > 0:
+        transform.append(FrequencyMask(FLAGS.mask_F))
     transform = torch.nn.Sequential(*transform)
     return transform, input_size
 
@@ -148,7 +155,8 @@ class Trainer:
         FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
-        transform, input_size = get_transform()
+        transform_train, input_size = get_transform('train')
+        transform_test, _ = get_transform('test')
 
         # Tokenizer
         if FLAGS.tokenizer == 'char':
@@ -161,19 +169,29 @@ class Trainer:
         self.dataloader_train = DataLoader(
             dataset=MergedDataset([
                 Librispeech(
-                    root=FLAGS.LibriSpeech_train,
+                    root='./data/LibriSpeech/train-other-500',
                     tokenizer=self.tokenizer,
-                    transforms=transform,
+                    transforms=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                Librispeech(
+                    root='./data/LibriSpeech/train-clean-360',
+                    tokenizer=self.tokenizer,
+                    transforms=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                Librispeech(
+                    root='./data/LibriSpeech/train-clean-100',
+                    tokenizer=self.tokenizer,
+                    transforms=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
                 # TEDLIUM(
-                #     root=FLAGS.TEDLIUM_train1,
+                #     root=FLAGS.TEDLIUM_train,
                 #     tokenizer=self.tokenizer,
-                #     transforms=transform,
+                #     transforms=transform_train,
                 #     audio_max_length=FLAGS.audio_max_length),
                 # CommonVoice(
                 #     root=FLAGS.CommonVoice, labels='train.tsv',
                 #     tokenizer=self.tokenizer,
-                #     transforms=transform,
+                #     transforms=transform_train,
                 #     audio_max_length=FLAGS.audio_max_length)
             ]),
             batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
@@ -184,7 +202,7 @@ class Trainer:
                 Librispeech(
                     root=FLAGS.LibriSpeech_test,
                     tokenizer=self.tokenizer,
-                    transforms=transform,
+                    transforms=transform_test,
                     reverse_sorted_by_length=True)]),
             batch_size=FLAGS.eval_batch_size, shuffle=False, num_workers=4,
             collate_fn=seq_collate)
