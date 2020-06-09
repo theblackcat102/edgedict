@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import json
-import re
 import string
-import numpy as np
 import os
 
 from .text import _clean_text
@@ -37,24 +35,26 @@ def normalize_string(s, labels, table, **unused_kwargs):
     def good_token(token, labels):
         s = set(labels)
         for t in token:
-            if not t in s:
+            if t not in s:
                 return False
         return True
 
     try:
         text = _clean_text(s, ["english_cleaners"], table).strip()
         return ''.join([t for t in text if good_token(t, labels=labels)])
-    except:
+    except Exception:
         print("WARNING: Normalizing {} failed".format(s))
         return None
 
+
 class Manifest(object):
-    def __init__(self, data_dir, manifest_paths, labels, blank_index, max_duration=None, pad_to_max=False,
+    def __init__(self, data_dir, manifest_paths, labels, blank_index,
+                 max_duration=None, pad_to_max=False,
                  min_duration=None, sort_by_duration=False, max_utts=0,
                  normalize=True, speed_perturbation=False, filter_speed=1.0):
         self.labels_map = dict([(labels[i], i) for i in range(len(labels))])
         self.blank_index = blank_index
-        self.max_duration= max_duration
+        self.max_duration = max_duration
         ids = []
         duration = 0.0
         filtered_duration = 0.0
@@ -66,20 +66,22 @@ class Manifest(object):
             punctuation = string.punctuation
             punctuation = punctuation.replace("+", "")
             punctuation = punctuation.replace("&", "")
-            ### We might also want to consider:
-            ### @ -> at
-            ### # -> number, pound, hashtag
-            ### ~ -> tilde
-            ### _ -> underscore
-            ### % -> percent
-            # If a punctuation symbol is inside our vocab, we do not remove from text
-            for l in labels:
-                punctuation = punctuation.replace(l, "")
+            # We might also want to consider:
+            # @ -> at
+            # # -> number, pound, hashtag
+            # ~ -> tilde
+            # _ -> underscore
+            # % -> percent
+            # If a punctuation symbol is inside our vocab, we do not remove
+            # from text
+            for label in labels:
+                punctuation = punctuation.replace(label, "")
             # Turn all punctuation to whitespace
             table = str.maketrans(punctuation, " " * len(punctuation))
+
         for manifest_path in manifest_paths:
             with open(manifest_path, "r", encoding="utf-8") as fh:
-                a=json.load(fh)
+                a = json.load(fh)
                 for data in a:
                     files_and_speeds = data['files']
 
@@ -87,39 +89,50 @@ class Manifest(object):
                         if not speed_perturbation:
                             min_speed = filter_speed
                         else:
-                            min_speed = min(x['speed'] for x in files_and_speeds)
+                            min_speed = min(
+                                x['speed'] for x in files_and_speeds)
                         max_duration = self.max_duration * min_speed
 
                     data['duration'] = data['original_duration']
-                    if min_duration is not None and data['duration'] < min_duration:
-                        filtered_duration += data['duration']
-                        continue
-                    if max_duration is not None and data['duration'] > max_duration:
-                        filtered_duration += data['duration']
-                        continue
+                    if min_duration is not None:
+                        if data['duration'] < min_duration:
+                            filtered_duration += data['duration']
+                            continue
+                    if max_duration is not None:
+                        if data['duration'] > max_duration:
+                            filtered_duration += data['duration']
+                            continue
 
                     # Prune and normalize according to transcript
-                    transcript_text = data[
-                        'transcript'] if "transcript" in data else self.load_transcript(
-                        data['text_filepath'])
+                    if "transcript" in data:
+                        transcript_text = data['transcript']
+                    else:
+                        transcript_text = self.load_transcript(
+                            data['text_filepath'])
                     if normalize:
-                        transcript_text = normalize_string(transcript_text, labels=labels,
-                                                                                             table=table)
+                        transcript_text = normalize_string(
+                            transcript_text, labels=labels, table=table)
                     if not isinstance(transcript_text, str):
                         print(
-                            "WARNING: Got transcript: {}. It is not a string. Dropping data point".format(
-                                transcript_text))
+                            "WARNING: Got transcript: {}. It is not a string. "
+                            "Dropping data point".format(transcript_text))
                         filtered_duration += data['duration']
                         continue
-                    data["transcript"] = self.parse_transcript(transcript_text) # convert to vocab indices
+                        # convert to vocab indices
+                    data["transcript"] = self.parse_transcript(transcript_text)
 
                     if speed_perturbation:
                         audio_paths = [x['fname'] for x in files_and_speeds]
-                        data['audio_duration'] = [x['duration'] for x in files_and_speeds]
+                        data['audio_duration'] = \
+                            [x['duration'] for x in files_and_speeds]
                     else:
-                        audio_paths = [x['fname'] for x in files_and_speeds if x['speed'] == filter_speed]
-                        data['audio_duration'] = [x['duration'] for x in files_and_speeds if x['speed'] == filter_speed]
-                    data['audio_filepath'] = [os.path.join(data_dir, x) for x in audio_paths]
+                        audio_paths = [x['fname'] for x in files_and_speeds
+                                       if x['speed'] == filter_speed]
+                        data['audio_duration'] = \
+                            [x['duration'] for x in files_and_speeds
+                             if x['speed'] == filter_speed]
+                    data['audio_filepath'] = \
+                        [os.path.join(data_dir, x) for x in audio_paths]
                     data.pop('files')
                     data.pop('original_duration')
 
@@ -128,7 +141,8 @@ class Manifest(object):
 
                     if max_utts > 0 and len(ids) >= max_utts:
                         print(
-                            'Stopping parsing %s as max_utts=%d' % (manifest_path, max_utts))
+                            'Stopping parsing %s as max_utts=%d' % (
+                                manifest_path, max_utts))
                         break
 
         if sort_by_duration:
@@ -144,7 +158,8 @@ class Manifest(object):
         return transcript
 
     def parse_transcript(self, transcript):
-        chars = [self.labels_map.get(x, self.blank_index) for x in list(transcript)]
+        chars = [
+            self.labels_map.get(x, self.blank_index) for x in list(transcript)]
         transcript = list(filter(lambda x: x != self.blank_index, chars))
         return transcript
 

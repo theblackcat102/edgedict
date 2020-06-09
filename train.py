@@ -14,8 +14,9 @@ from torchaudio.transforms import (
 from tensorboardX import SummaryWriter
 from warprnnt_pytorch import RNNTLoss
 
-from dataset import seq_collate, MergedDataset, Librispeech
 from models import Transducer
+from dataset import seq_collate, MergedDataset, Librispeech
+from parts.features import FilterbankFeatures
 from transforms import CatDeltas, CMVN, Downsample
 from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 
@@ -76,7 +77,7 @@ flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
 flags.DEFINE_float('audio_max_length', 14, help='max length in seconds')
-flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec'], help='audio feature')
+flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'logfbank'], help='audio feature')
 flags.DEFINE_integer('feature_size', 80, help='mel_bins')
 flags.DEFINE_integer('n_fft', 400, help='spectrogram')
 flags.DEFINE_integer('win_length', 400, help='spectrogram')
@@ -121,10 +122,13 @@ def get_transform():
     input_size = FLAGS.feature_size
     if FLAGS.feature == 'mfcc':
         transform.append(MFCC(
-            log_mels=True, n_mfcc=FLAGS.feature_size, melkwargs=feature_args))
+            n_mfcc=FLAGS.feature_size, log_mels=True, melkwargs=feature_args))
     if FLAGS.feature == 'melspec':
-        transform.append(
-            MelSpectrogram(n_mels=FLAGS.feature_size, **feature_args))
+        transform.append(MelSpectrogram(
+            n_mels=FLAGS.feature_size, **feature_args))
+    if FLAGS.feature == 'logfbank':
+        transform.append(FilterbankFeatures(
+            n_filt=FLAGS.feature_size, **feature_args))
     if FLAGS.delta:
         transform.append(CatDeltas())
         input_size = input_size * 3
