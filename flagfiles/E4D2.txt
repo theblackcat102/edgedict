@@ -1,24 +1,27 @@
 --optim=adam
 --lr=0.0005
 --sched
+--sched_patience=1
+--sched_factor=0.5
+--sched_min_lr=1e-6
 --warmup_step=10000
 --epochs=30
---batch_size=8
---sub_batch_size=8
+--batch_size=32
+--sub_batch_size=16
 --eval_batch_size=4
 
---enc_hidden_size=600
+--enc_hidden_size=512
 --enc_layers=4
 --enc_dropout=0.0
---enc_proj_size=600
---dec_hidden_size=150
+--enc_proj_size=512
+--dec_hidden_size=128
 --dec_layers=2
 --dec_dropout=0.0
---dec_proj_size=150
---joint_size=600
+--dec_proj_size=128
+--joint_size=512
 
---audio_max_length=14
---feature=mfcc
+--audio_max_length=16
+--feature=NV
 --feature_size=80
 --n_fft=400
 --win_length=400
@@ -26,13 +29,17 @@
 --nodelta
 --nocmvn
 --downsample=3
+--T_mask=50
+--T_num_mask=2
+--F_mask=5
+--F_num_mask=1
 
 --tokenizer=bpe
---bpe_size=400
---vocab_embed_size=16
+--bpe_size=2048
+--vocab_embed_size=64
 
---save_step=10000
---eval_step=10000
+--save_step=3000
+--eval_step=3000
 --sample_size=20
 
 --apex
