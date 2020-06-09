@@ -32,7 +32,7 @@ flags.DEFINE_string('LibriSpeech_train_360',
                     "./datasets/LibriSpeech/train-clean-360",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_train_500',
-                    "./datasets/LibriSpeech/train-clean-500",
+                    "./datasets/LibriSpeech/train-other-500",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_test',
                     "./datasets/LibriSpeech/test-clean",

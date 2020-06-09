@@ -72,7 +72,7 @@ class AudioDataset(Dataset):
         print('Dataset : %s' % desc)
         print('size    : %d' % len(self.data))
         print('Time    : %.3f hours' % (total_secs / 3600))
-        print('filtered: %.3f hours' % (total_secs / 3600))
+        print('filtered: %.3f hours' % (fitered_secs / 3600))
 
         if reverse_sorted_by_length:
             self.data = sorted(

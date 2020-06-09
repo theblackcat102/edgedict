@@ -2,7 +2,6 @@ import os
 import tempfile
 import pickle
 
-import torch
 from tokenizers import CharBPETokenizer
 
 NUL = 0

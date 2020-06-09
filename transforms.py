@@ -3,10 +3,11 @@ import torchaudio
 
 
 class CatDeltas(torch.nn.Module):
+    @torch.no_grad()
     def forward(self, feat):
         d1 = torchaudio.functional.compute_deltas(feat)
         d2 = torchaudio.functional.compute_deltas(d1)
-        feat = torch.cat([feat, d1.T, d2.T], dim=1)
+        feat = torch.cat([feat, d1, d2], dim=1)
         return feat
 
 
@@ -22,6 +23,7 @@ class CMVN(torch.nn.Module):
 
 
 class Downsample(torch.nn.Module):
+
     def __init__(self, n_frame):
         super().__init__()
         self.n_frame = n_frame
