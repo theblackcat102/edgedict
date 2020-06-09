@@ -1,9 +1,10 @@
 .vscode/
-logs
 save/
+logs/
 outputs/
+datasets/
+config/
 BPE
-data
 
 
 # Byte-compiled / optimized / DLL files

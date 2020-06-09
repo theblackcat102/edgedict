@@ -10,8 +10,7 @@ import torchaudio.transforms as transforms
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
-from tokenizer import zero_pad_concat, end_pad_concat
-from transforms import AudioPreprocessing
+from tokenizer import PAD
 
 
 class MergedDataset(ConcatDataset):
@@ -32,8 +31,8 @@ class MergedDataset(ConcatDataset):
 
 class AudioDataset(Dataset):
     def __init__(self, root, tokenizer, session='', desc='AudioDataset',
-                 audio_max_length=99, audio_min_length=1, sampling_rate=16000,
-                 preprocess=None, transform=None, reverse_sorted_by_length=False):
+                 transform=None, audio_max_length=18, audio_min_length=1,
+                 sampling_rate=16000, reverse_sorted_by_length=False):
         self.root = root
         processed_labels = os.path.join(
             root, 'preprocessed_v3_%s.pkl' % session)
@@ -62,14 +61,18 @@ class AudioDataset(Dataset):
             pickle.dump(data, open(processed_labels, 'wb'))
 
         total_secs = 0
+        fitered_secs = 0
         self.data = []
         for x in data:
             if audio_min_length <= x['audio_length'] <= audio_max_length:
                 self.data.append(x)
                 total_secs += x['audio_length']
-        print('Dataset: %s' % desc)
-        print('size   : %d' % len(self.data))
-        print('Time   : %.3f hours' % (total_secs / 3600))
+            else:
+                fitered_secs += x['audio_length']
+        print('Dataset : %s' % desc)
+        print('size    : %d' % len(self.data))
+        print('Time    : %.3f hours' % (total_secs / 3600))
+        print('filtered: %.3f hours' % (total_secs / 3600))
 
         if reverse_sorted_by_length:
             self.data = sorted(
@@ -77,15 +80,6 @@ class AudioDataset(Dataset):
         # print(root, data[0]['path'])
         self.transform = transform
         self.tokenizer = tokenizer
-
-        if preprocess is None:
-            self.preprocess = AudioPreprocessing(
-                normalize='per_feature', sample_rate=16000, window_size=0.02,
-                window_stride=0.01, features=80, n_fft=512,
-                feat_type='logfbank', trim_silence=True, window='hann',
-                dither=0.00001, frame_splicing=1)
-        else:
-            self.preprocess = preprocess
 
     def texts(self):
         return [x['text'] for x in self.data]
@@ -104,14 +98,12 @@ class AudioDataset(Dataset):
         except Exception:
             print("Failt to load %s, closed" % path)
             exit(0)
-        data = data[0]
-        data, _ = self.preprocess(data.unsqueeze(0), torch.tensor(data.shape))
-        data = self.transform(data[0])
+        data = self.transform(data[:1])
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
 
-        return data, tokens
+        return data[0].T, tokens
 
 
 class YoutubeCaption(AudioDataset):
@@ -204,6 +196,29 @@ class TEDLIUM(AudioDataset):
         return paths, texts
 
 
+def zero_pad_concat(feats):
+    # Pad audio feature sets
+    max_t = max(len(feat) for feat in feats)
+    shape = (len(feats), max_t) + feats[0].shape[1:]
+
+    input_mat = torch.zeros(shape)
+    for e, feat in enumerate(feats):
+        input_mat[e, :len(feat)] = feat
+
+    return input_mat
+
+
+def end_pad_concat(texts):
+    # Pad text token sets
+    max_t = max(len(text) for text in texts)
+    shape = (len(texts), max_t)
+
+    labels = torch.full(shape, fill_value=PAD, dtype=torch.long)
+    for e, l in enumerate(texts):
+        labels[e, :len(l)] = l
+    return labels
+
+
 def seq_collate(results):
     xs = []
     ys = []
@@ -224,21 +239,22 @@ def seq_collate(results):
 
 if __name__ == "__main__":
     from tokenizer import CharTokenizer
+    from transforms import CatDeltas, CMVN, Downsample
+
     transform = torch.nn.Sequential(
         # transforms.MelSpectrogram(n_mels=40),
         transforms.MFCC(
             n_mfcc=80,
             melkwargs={
-                'n_fft': 400,
-                'win_length': 400,
-                'hop_length': 200,
+                'n_fft': 512,
+                'win_length': 320,
+                'hop_length': 160,
                 'f_min': 20,
                 'f_max': 5800
             }),
-        mtransforms.Transpose(),
-        mtransforms.CatDeltas(),
-        mtransforms.CMVN(),
-        mtransforms.Downsample(3)
+        CatDeltas(),
+        CMVN(),
+        Downsample(3)
     )
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
@@ -309,7 +325,6 @@ if __name__ == "__main__":
 
     tokenizer.build(train_dataloader.dataset.texts())
     print("==========================")
-    from tqdm import tqdm
     for xs, ys, xlen, ylen in tqdm(train_dataloader):
         pass
         print(xs.shape, ys.shape, xlen.shape, ylen.shape)

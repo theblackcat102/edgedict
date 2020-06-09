@@ -9,33 +9,41 @@ from absl import app, flags
 from apex import amp
 from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
-from torchaudio.transforms import MFCC, MelSpectrogram
+from torchaudio.transforms import (
+    MFCC, MelSpectrogram, TimeMasking, FrequencyMasking)
 from tensorboardX import SummaryWriter
 from warprnnt_pytorch import RNNTLoss
 
-from dataset import (
-    seq_collate, MergedDataset, Librispeech, TEDLIUM, CommonVoice)
+from dataset import seq_collate, MergedDataset, Librispeech
 from models import Transducer
-from specaugment import TimeMask, FrequencyMask
-from transforms import (
-    CatDeltas, CMVN, Downsample, Transpose, AudioPreprocessing)
+from transforms import CatDeltas, CMVN, Downsample
 from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string('name', 'rnn-t-v3', help='session name')
-flags.DEFINE_string('eval_model', None, help='evaluate and exit')
+flags.DEFINE_string('name', 'rnn-t-v4', help='session name')
+flags.DEFINE_string('evaluate_model', None, help='evaluate and exit')
 flags.DEFINE_string('resume_from', None, help='resume from checkpoint')
 # dataset
-flags.DEFINE_string('LibriSpeech_train', "./data/LibriSpeech/train-clean-360",
+flags.DEFINE_string('LibriSpeech_train_100',
+                    "./datasets/LibriSpeech/train-clean-100",
                     help='LibriSpeech train')
-flags.DEFINE_string('LibriSpeech_test', "./data/LibriSpeech/test-clean",
+flags.DEFINE_string('LibriSpeech_train_360',
+                    "./datasets/LibriSpeech/train-clean-360",
+                    help='LibriSpeech train')
+flags.DEFINE_string('LibriSpeech_train_500',
+                    "./datasets/LibriSpeech/train-clean-500",
+                    help='LibriSpeech train')
+flags.DEFINE_string('LibriSpeech_test',
+                    "./datasets/LibriSpeech/test-clean",
                     help='LibriSpeech test')
-flags.DEFINE_string('TEDLIUM_train', "./data/TEDLIUM_release-3/data",
+flags.DEFINE_string('TEDLIUM_train',
+                    "./datasets/TEDLIUM_release-3/data",
                     help='TEDLIUM 3 train')
-flags.DEFINE_string('TEDLIUM_test', "./data/TEDLIUM_release1/test",
+flags.DEFINE_string('TEDLIUM_test',
+                    "./datasets/TEDLIUM_release1/test",
                     help='TEDLIUM 1 test')
-flags.DEFINE_string('CommonVoice', "./data/common_voice",
+flags.DEFINE_string('CommonVoice', "./datasets/common_voice",
                     help='common voice')
 # learning
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
@@ -53,13 +61,13 @@ flags.DEFINE_float('gradclip', None, help='clip norm value')
 # encoder
 flags.DEFINE_integer('enc_hidden_size', 600, help='encoder hidden dimension')
 flags.DEFINE_integer('enc_layers', 4, help='encoder layers')
-flags.DEFINE_float('enc_dropout', 0, help='encoder dropout')
 flags.DEFINE_integer('enc_proj_size', 600, help='encoder layers')
+flags.DEFINE_float('enc_dropout', 0, help='encoder dropout')
 # decoder
 flags.DEFINE_integer('dec_hidden_size', 150, help='decoder hidden dimension')
 flags.DEFINE_integer('dec_layers', 2, help='decoder layers')
-flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 flags.DEFINE_integer('dec_proj_size', 150, help='encoder layers')
+flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 # joint
 flags.DEFINE_integer('joint_size', 512, help='Joint hidden dimension')
 # tokenizer
@@ -68,7 +76,7 @@ flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
 flags.DEFINE_integer('audio_max_length', 14, help='max length in seconds')
-flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'NV'], help='audio feature')
+flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec'], help='audio feature')
 flags.DEFINE_integer('feature_size', 80, help='mel_bins')
 flags.DEFINE_integer('n_fft', 400, help='spectrogram')
 flags.DEFINE_integer('win_length', 400, help='spectrogram')
@@ -101,8 +109,7 @@ def infloop(dataloader):
         epoch += 1
 
 
-def get_transform(mode):
-    # Transform
+def get_transform():
     feature_args = {
         'n_fft': FLAGS.n_fft,
         'win_length': FLAGS.win_length,
@@ -110,20 +117,14 @@ def get_transform(mode):
         'f_min': 20,
         'f_max': 5800,
     }
-    # feature extraction
-    if FLAGS.feature == 'mfcc':
-        preprocess = MFCC(
-            log_mels=True, n_mfcc=FLAGS.feature_size, melkwargs=feature_args)
-    if FLAGS.feature == 'melspec':
-        preprocess = MelSpectrogram(n_mels=FLAGS.feature_size, **feature_args)
-    if FLAGS.feature == 'NV':
-        preprocess = AudioPreprocessing(
-            normalize='per_feature', sample_rate=16000, window_size=0.02,
-            window_stride=0.01, features=FLAGS.feature_size, n_fft=512,
-            feat_type='logfbank', trim_silence=True, window='hann',
-            dither=0.00001, frame_splicing=1, transpose_out=True)
     transform = []
     input_size = FLAGS.feature_size
+    if FLAGS.feature == 'mfcc':
+        transform.append(MFCC(
+            log_mels=True, n_mfcc=FLAGS.feature_size, melkwargs=feature_args))
+    if FLAGS.feature == 'melspec':
+        transform.append(
+            MelSpectrogram(n_mels=FLAGS.feature_size, **feature_args))
     if FLAGS.delta:
         transform.append(CatDeltas())
         input_size = input_size * 3
@@ -132,18 +133,17 @@ def get_transform(mode):
     if FLAGS.downsample > 1:
         transform.append(Downsample(FLAGS.downsample))
         input_size = input_size * FLAGS.downsample
-    if mode == 'train' and FLAGS.T_mask > 0:
-        transform.append(TimeMask(FLAGS.T_mask, FLAGS.T_num_mask))
-    if mode == 'train' and FLAGS.F_mask > 0:
-        transform.append(FrequencyMask(FLAGS.F_mask, FLAGS.F_num_mask))
-    transform = torch.nn.Sequential(*transform)
-    return transform, preprocess, input_size
+    transform_test = torch.nn.Sequential(*transform)
 
+    if FLAGS.T_mask > 0 and FLAGS.T_num_mask > 0:
+        for _ in range(FLAGS.T_num_mask):
+            transform.append(TimeMasking(FLAGS.T_mask))
+    if FLAGS.F_mask > 0 and FLAGS.F_num_mask > 0:
+        for _ in range(FLAGS.F_num_mask):
+            transform.append(FrequencyMasking(FLAGS.F_mask, FLAGS.F_num_mask))
+    transform_train = torch.nn.Sequential(*transform)
 
-def get_lambda_lr(warmup_step):
-    def get_lr(step):
-        return min((step + 1) / warmup_step, 1.)
-    return get_lr
+    return transform_train, transform_test, input_size
 
 
 class Trainer:
@@ -159,8 +159,7 @@ class Trainer:
         FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
-        transform_train, preprocess_train, input_size = get_transform('train')
-        transform_test, preprocess_test, _ = get_transform('test')
+        transform_train, transform_test, input_size = get_transform()
 
         # Tokenizer
         if FLAGS.tokenizer == 'char':
@@ -173,22 +172,19 @@ class Trainer:
         self.dataloader_train = DataLoader(
             dataset=MergedDataset([
                 Librispeech(
-                    root='./data/LibriSpeech/train-other-500',
+                    root=FLAGS.LibriSpeech_train_500,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 Librispeech(
-                    root='./data/LibriSpeech/train-clean-360',
+                    root=FLAGS.LibriSpeech_train_360,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 Librispeech(
-                    root='./data/LibriSpeech/train-clean-100',
+                    root=FLAGS.LibriSpeech_train_100,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 # TEDLIUM(
                 #     root=FLAGS.TEDLIUM_train,
@@ -210,7 +206,6 @@ class Trainer:
                     root=FLAGS.LibriSpeech_test,
                     tokenizer=self.tokenizer,
                     transform=transform_test,
-                    preprocess=preprocess_test,
                     reverse_sorted_by_length=True)]),
             batch_size=FLAGS.eval_batch_size, shuffle=False, num_workers=4,
             collate_fn=seq_collate)
@@ -393,7 +388,7 @@ class Trainer:
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(FLAGS.eval_model)
+        checkpoint = torch.load(FLAGS.evaluate_model)
         self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:
@@ -417,8 +412,8 @@ class Trainer:
 def main(argv):
     trainer = Trainer()
 
-    if FLAGS.eval_model:
-        trainer.load(FLAGS.eval_model)
+    if FLAGS.evaluate_model:
+        trainer.load(FLAGS.evaluate_model)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
             print('True: %s\n\nPred:%s' % (pred_seq, true_seq))
