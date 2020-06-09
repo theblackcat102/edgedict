@@ -3,21 +3,22 @@ from datetime import datetime
 
 import jiwer
 import torch
-import torchaudio.transforms as transforms
 import numpy as np
 import torch.optim as optim
 from absl import app, flags
 from apex import amp
-from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
+from torch.utils.data import DataLoader
+from torchaudio.transforms import MFCC, MelSpectrogram
+from tensorboardX import SummaryWriter
 from warprnnt_pytorch import RNNTLoss
 
 from dataset import (
     seq_collate, MergedDataset, Librispeech, TEDLIUM, CommonVoice)
 from models import Transducer
 from specaugment import TimeMask, FrequencyMask
-from transforms import CatDeltas, CMVN, Downsample, Transpose, AudioPreprocessing
+from transforms import (
+    CatDeltas, CMVN, Downsample, Transpose, AudioPreprocessing)
 from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
 
 
@@ -60,8 +61,7 @@ flags.DEFINE_integer('dec_layers', 2, help='decoder layers')
 flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 flags.DEFINE_integer('dec_proj_size', 150, help='encoder layers')
 # joint
-flags.DEFINE_integer('proj_size', 320, help='RNN hidden dimension')
-flags.DEFINE_integer('joint_size', 512, help='RNN hidden dimension')
+flags.DEFINE_integer('joint_size', 512, help='Joint hidden dimension')
 # tokenizer
 flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
 flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
@@ -112,13 +112,10 @@ def get_transform(mode):
     }
     # feature extraction
     if FLAGS.feature == 'mfcc':
-        preprocess = transforms.MFCC(
-            log_mels=True,
-            n_mfcc=FLAGS.feature_size,
-            melkwargs=feature_args)
+        preprocess = MFCC(
+            log_mels=True, n_mfcc=FLAGS.feature_size, melkwargs=feature_args)
     if FLAGS.feature == 'melspec':
-        preprocess = transforms.MelSpectrogram(
-            n_mels=FLAGS.feature_size, **feature_args)
+        preprocess = MelSpectrogram(n_mels=FLAGS.feature_size, **feature_args)
     if FLAGS.feature == 'NV':
         preprocess = AudioPreprocessing(
             normalize='per_feature', sample_rate=16000, window_size=0.02,

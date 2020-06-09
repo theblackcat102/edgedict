@@ -29,53 +29,35 @@ class AudioPreprocessing(nn.Module):
             return processed_signal, processed_length
 
 
-class SpectrogramAugmentation(nn.Module):
-    """Spectrogram augmentation
-    """
-    def __init__(self, **kwargs):
-        nn.Module.__init__(self)
-        self.spec_cutout_regions = SpecCutoutRegions(kwargs)
-        self.spec_augment = SpecAugment(kwargs)
-
-    @torch.no_grad()
-    def forward(self, input_spec):
-        augmented_spec = self.spec_cutout_regions(input_spec)
-        augmented_spec = self.spec_augment(augmented_spec)
-        return augmented_spec
-
-
 class SpecAugment(nn.Module):
     """Spec augment. refer to https://arxiv.org/abs/1904.08779
     """
-    def __init__(self, cfg):
+    def __init__(self,
+                 time_regions=0, time_width=10,
+                 freq_regions=0, freq_width=10):
         super(SpecAugment, self).__init__()
-        self.cutout_x_regions = cfg.get('cutout_x_regions', 0)
-        self.cutout_y_regions = cfg.get('cutout_y_regions', 0)
-
-        self.cutout_x_width = cfg.get('cutout_x_width', 10)
-        self.cutout_y_width = cfg.get('cutout_y_width', 10)
+        self.time_regions = time_regions
+        self.freq_regions = freq_regions
+        self.time_width = time_width
+        self.freq_width = freq_width
 
     @torch.no_grad()
     def forward(self, x):
-        sh = x.shape
+        shape = x.shape
+        mask = x.new_zeros(x.shape, dtype=torch.uint8)
 
-        mask = torch.zeros(x.shape).byte()
-        for idx in range(sh[0]):
-            for _ in range(self.cutout_x_regions):
-                cutout_x_left = int(
-                    random.uniform(0, sh[1] - self.cutout_x_width))
+        for idx in range(shape[0]):
+            for _ in range(self.time_regions):
+                time_idx = int(
+                    random.uniform(0, shape[1] - self.time_width))
+                mask[idx, time_idx:time_idx + self.time_width, :] = 1
 
-                mask[idx,
-                     cutout_x_left:cutout_x_left + self.cutout_x_width, :] = 1
+            for _ in range(self.freq_regions):
+                freq_idx = int(
+                    random.uniform(0, shape[2] - self.freq_width))
+                mask[idx, :, freq_idx:freq_idx + self.freq_width] = 1
 
-            for _ in range(self.cutout_y_regions):
-                cutout_y_left = int(
-                    random.uniform(0, sh[2] - self.cutout_y_width))
-
-                mask[idx, :,
-                     cutout_y_left:cutout_y_left + self.cutout_y_width] = 1
-
-        x = x.masked_fill(mask.to(device=x.device), 0)
+        x = x.masked_fill(mask, 0)
 
         return x
 
@@ -83,31 +65,28 @@ class SpecAugment(nn.Module):
 class SpecCutoutRegions(nn.Module):
     """Cutout. refer to https://arxiv.org/pdf/1708.04552.pdf
     """
-    def __init__(self, cfg):
+    def __init__(self, rect_regions=0, rect_time=5, rect_freq=20):
         super(SpecCutoutRegions, self).__init__()
 
-        self.cutout_rect_regions = cfg.get('cutout_rect_regions', 0)
-        self.cutout_rect_time = cfg.get('cutout_rect_time', 5)
-        self.cutout_rect_freq = cfg.get('cutout_rect_freq', 20)
+        self.rect_regions = rect_regions
+        self.rect_time = rect_time
+        self.rect_freq = rect_freq
 
     @torch.no_grad()
     def forward(self, x):
-        sh = x.shape
+        shape = x.shape
+        mask = x.new_zeros(x.shape, dtype=torch.uint8)
 
-        mask = torch.zeros(x.shape, dtype=torch.uint8)
-
-        for idx in range(sh[0]):
-            for i in range(self.cutout_rect_regions):
-                cutout_rect_x = int(random.uniform(
-                        0, sh[1] - self.cutout_rect_freq))
-                cutout_rect_y = int(random.uniform(
-                        0, sh[2] - self.cutout_rect_time))
+        for idx in range(shape[0]):
+            for i in range(self.rect_regions):
+                time_idx = int(random.uniform(0, shape[1] - self.rect_time))
+                freq_idx = int(random.uniform(0, shape[2] - self.rect_freq))
 
                 mask[idx,
-                     cutout_rect_x:cutout_rect_x + self.cutout_rect_freq,
-                     cutout_rect_y:cutout_rect_y + self.cutout_rect_time] = 1
+                     time_idx:time_idx + self.rect_time,
+                     freq_idx:freq_idx + self.rect_freq] = 1
 
-        x = x.masked_fill(mask.to(device=x.device), 0)
+        x = x.masked_fill(mask, 0)
 
         return x
 
