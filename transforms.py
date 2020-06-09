@@ -12,7 +12,7 @@ class CatDeltas(torch.nn.Module):
 
 
 class CMVN(torch.nn.Module):
-    eps = 1e-10
+    eps = 1e-5
 
     @torch.no_grad()
     def forward(self, feat):

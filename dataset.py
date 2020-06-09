@@ -31,7 +31,7 @@ class MergedDataset(ConcatDataset):
 
 class AudioDataset(Dataset):
     def __init__(self, root, tokenizer, session='', desc='AudioDataset',
-                 transform=None, audio_max_length=18, audio_min_length=1,
+                 transform=None, audio_min_length=0, audio_max_length=999,
                  sampling_rate=16000, reverse_sorted_by_length=False):
         self.root = root
         processed_labels = os.path.join(

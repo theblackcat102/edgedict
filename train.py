@@ -75,7 +75,7 @@ flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
 flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
-flags.DEFINE_integer('audio_max_length', 14, help='max length in seconds')
+flags.DEFINE_float('audio_max_length', 14, help='max length in seconds')
 flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec'], help='audio feature')
 flags.DEFINE_integer('feature_size', 80, help='mel_bins')
 flags.DEFINE_integer('n_fft', 400, help='spectrogram')
