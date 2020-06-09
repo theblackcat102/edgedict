@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
 from tokenizer import zero_pad_concat, end_pad_concat
-import transforms as mtransforms
+from transforms import AudioPreprocessing
 
 
 class MergedDataset(ConcatDataset):
@@ -33,7 +33,7 @@ class MergedDataset(ConcatDataset):
 class AudioDataset(Dataset):
     def __init__(self, root, tokenizer, session='', desc='AudioDataset',
                  audio_max_length=99, audio_min_length=1, sampling_rate=16000,
-                 transforms=None, reverse_sorted_by_length=False):
+                 preprocess=None, transform=None, reverse_sorted_by_length=False):
         self.root = root
         processed_labels = os.path.join(
             root, 'preprocessed_v3_%s.pkl' % session)
@@ -75,8 +75,17 @@ class AudioDataset(Dataset):
             self.data = sorted(
                 self.data, key=lambda x: x['audio_length'], reverse=True)
         # print(root, data[0]['path'])
-        self.transforms = transforms
+        self.transform = transform
         self.tokenizer = tokenizer
+
+        if preprocess is None:
+            self.preprocess = AudioPreprocessing(
+                normalize='per_feature', sample_rate=16000, window_size=0.02,
+                window_stride=0.01, features=80, n_fft=512,
+                feat_type='logfbank', trim_silence=True, window='hann',
+                dither=0.00001, frame_splicing=1)
+        else:
+            self.preprocess = preprocess
 
     def texts(self):
         return [x['text'] for x in self.data]
@@ -95,7 +104,9 @@ class AudioDataset(Dataset):
         except Exception:
             print("Failt to load %s, closed" % path)
             exit(0)
-        data = self.transforms(data[:1])
+        data = data[0]
+        data, _ = self.preprocess(data.unsqueeze(0), torch.tensor(data.shape))
+        data = self.transform(data[0])
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
