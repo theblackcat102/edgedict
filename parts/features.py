@@ -18,15 +18,13 @@ import math
 import librosa
 
 
-@torch.jit.script
 def normalize_batch(x, seq_len, normalize_type: str):
-    # print("normalize_batch: x, seq_len, shapes: ",
-    #       x.shape, seq_len, seq_len.shape)
     if normalize_type == "per_feature":
-        x_mean = torch.zeros((seq_len.shape[0], x.shape[1]), dtype=x.dtype,
-                             device=x.device)
-        x_std = torch.zeros((seq_len.shape[0], x.shape[1]), dtype=x.dtype,
-                            device=x.device)
+        assert not torch.isnan(x).any(), x
+        x_mean = torch.zeros(
+            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device)
+        x_std = torch.zeros(
+            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device)
         for i in range(x.shape[0]):
             x_mean[i, :] = x[i, :, :seq_len[i]].mean(dim=1)
             x_std[i, :] = x[i, :, :seq_len[i]].std(dim=1)
@@ -57,12 +55,12 @@ class FilterbankFeatures(nn.Module):
                  sample_rate=16000,
                  win_length=320,
                  hop_length=160,
-                 n_fft=None,
-                 window="hamming",
+                 n_fft=512,
+                 window="hann",
                  normalize="per_feature",
                  log=True,
                  dither=1e-5,
-                 pad_to=8,
+                 pad_to=0,
                  max_duration=16.7,
                  preemph=0.97,
                  n_filt=64,
@@ -110,8 +108,7 @@ class FilterbankFeatures(nn.Module):
         self.max_length = max_length + max_pad
 
     def get_seq_len(self, seq_len):
-        return torch.ceil(seq_len.to(dtype=torch.float) / self.hop_length).to(
-            dtype=torch.int)
+        return torch.ceil(seq_len.float() / self.hop_length).int()
 
     # do stft
     # TORCHSCRIPT: center removed due to bug
@@ -122,8 +119,7 @@ class FilterbankFeatures(nn.Module):
 
     def forward(self, x):
         # dtype = x.dtype
-        seq_len = x.shape[2]
-        seq_len = self.get_seq_len(seq_len)
+        seq_len = self.get_seq_len(torch.tensor([x.shape[1]]))
 
         # dither
         if self.dither > 0:
@@ -167,24 +163,5 @@ class FilterbankFeatures(nn.Module):
             #            if pad_amt != 0:
             x = nn.functional.pad(x, (0, self.pad_to - pad_amt))
 
+        assert not torch.isnan(x).any()
         return x  # .to(dtype)
-
-
-class FeatureFactory(object):
-    featurizers = {
-        "logfbank": FilterbankFeatures,
-        "fbank": FilterbankFeatures,
-        "stft": SpectrogramFeatures,
-        "logspect": SpectrogramFeatures,
-        "logstft": SpectrogramFeatures
-    }
-
-    def __init__(self):
-        pass
-
-    @classmethod
-    def create(cls, cfg):
-        feat_type = cfg.get('feat_type', "logspect")
-        featurizer = cls.featurizers[feat_type]
-        # return featurizer.from_config(cfg, log="log" in cfg['feat_type'])
-        return featurizer.from_config(cfg, log="log" in feat_type)

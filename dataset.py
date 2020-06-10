@@ -1,16 +1,106 @@
 import glob
 import os
 import pickle
+import string
+import re
 
 import numpy as np
 import pandas as pd
 import torchaudio
 import torch
-import torchaudio.transforms as transforms
+from unidecode import unidecode
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
 from tokenizer import PAD
+from parts.text.numbers import normalize_numbers
+
+
+class TextCleaner:
+    def __init__(self):
+        self.standard_chars = [
+            " ", "'", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+            "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
+            "w", "x", "y", "z"
+        ]
+        self.standard_chars_set = set(self.standard_chars)
+
+        punctuation = string.punctuation
+        punctuation = punctuation.replace("+", "")
+        punctuation = punctuation.replace("&", "")
+        punctuation = punctuation.replace("@", "")
+        punctuation = punctuation.replace("%", "")
+        for char in self.standard_chars:
+            punctuation = punctuation.replace(char, "")
+        self.punctuation = str.maketrans(punctuation, " " * len(punctuation))
+
+        self.abbreviations = [
+            (re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [
+                ('mrs', 'misess'),
+                ('mr', 'mister'),
+                ('dr', 'doctor'),
+                ('st', 'saint'),
+                ('co', 'company'),
+                ('jr', 'junior'),
+                ('maj', 'major'),
+                ('gen', 'general'),
+                ('drs', 'doctors'),
+                ('rev', 'reverend'),
+                ('lt', 'lieutenant'),
+                ('hon', 'honorable'),
+                ('sgt', 'sergeant'),
+                ('capt', 'captain'),
+                ('esq', 'esquire'),
+                ('ltd', 'limited'),
+                ('col', 'colonel'),
+                ('ft', 'fort'),
+            ]]
+        self.whitespace_re = re.compile(r'\s+')
+
+    def expand_abbreviations(self, text):
+        for regex, replacement in self._abbreviations:
+            text = re.sub(regex, replacement, text)
+        return text
+
+    def expand_numbers(self, text):
+        return normalize_numbers(text)
+
+    def lowercase(text):
+        return text.lower()
+
+    def collapse_whitespace(self, text):
+        return re.sub(self.whitespace_re, ' ', text)
+
+    def convert_to_ascii(self, text):
+        return unidecode(text)
+
+    def remove_punctuation(self, text):
+        text = text.translate(self.punctuation)
+        text = re.sub(r'&', " and ", text)
+        text = re.sub(r'\+', " plus ", text)
+        text = re.sub(r'@', " at ", text)
+        text = re.sub(r'%', " percent ", text)
+        return text
+
+    def english_cleaners(self, text):
+        text = self.convert_to_ascii(text)
+        text = self.lowercase(text)
+        text = self.expand_numbers(text)
+        text = self.expand_abbreviations(text)
+        text = self.remove_punctuation(text)
+        text = self.collapse_whitespace(text)
+        return text
+
+    def normalize(self, text):
+        def good_token(token):
+            for t in token:
+                if t not in self.standard_chars_set:
+                    return False
+            return True
+
+        text = self.english_cleaners(text).strip()
+        text = ''.join([token for token in text if good_token(token)])
+        return text
 
 
 class MergedDataset(ConcatDataset):
@@ -60,19 +150,24 @@ class AudioDataset(Dataset):
                         pbar.write('Fail to load %s' % full_path)
             pickle.dump(data, open(processed_labels, 'wb'))
 
+        # length limits and text cleaning
+        # text_cleaner = TextCleaner()
         total_secs = 0
-        fitered_secs = 0
+        filtered_secs = 0
         self.data = []
         for x in data:
             if audio_min_length <= x['audio_length'] <= audio_max_length:
+                # if normalize_text:
+                #     x['text'] = text_cleaner.normalize(x['text'])
                 self.data.append(x)
                 total_secs += x['audio_length']
             else:
-                fitered_secs += x['audio_length']
+                filtered_secs += x['audio_length']
         print('Dataset : %s' % desc)
         print('size    : %d' % len(self.data))
-        print('Time    : %.3f hours' % (total_secs / 3600))
-        print('filtered: %.3f hours' % (fitered_secs / 3600))
+        print('Time    : %.2f hours' % (total_secs / 3600))
+        print('Filtered: %.2f hours' % (filtered_secs / 3600))
+        print('=' * 40)
 
         if reverse_sorted_by_length:
             self.data = sorted(
@@ -239,16 +334,17 @@ def seq_collate(results):
 
 if __name__ == "__main__":
     from tokenizer import CharTokenizer
+    from torchaudio.transforms import MFCC
+
     from transforms import CatDeltas, CMVN, Downsample
 
     transform = torch.nn.Sequential(
-        # transforms.MelSpectrogram(n_mels=40),
-        transforms.MFCC(
+        MFCC(
             n_mfcc=80,
             melkwargs={
-                'n_fft': 512,
-                'win_length': 320,
-                'hop_length': 160,
+                'n_fft': 400,
+                'win_length': 400,
+                'hop_length': 200,
                 'f_min': 20,
                 'f_max': 5800
             }),

@@ -9,16 +9,12 @@ from absl import app, flags
 from apex import amp
 from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
-from torchaudio.transforms import (
-    MFCC, MelSpectrogram, TimeMasking, FrequencyMasking)
 from tensorboardX import SummaryWriter
-from warprnnt_pytorch import RNNTLoss
 
 from models import Transducer
 from dataset import seq_collate, MergedDataset, Librispeech
-from parts.features import FilterbankFeatures
-from transforms import CatDeltas, CMVN, Downsample
-from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
+from transforms import build_transform
+from tokenizer import HuggingFaceTokenizer, CharTokenizer
 
 
 FLAGS = flags.FLAGS
@@ -77,7 +73,8 @@ flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
 flags.DEFINE_float('audio_max_length', 14, help='max length in seconds')
-flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'logfbank'], help='audio feature')
+flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'logfbank'],
+                  help='audio feature')
 flags.DEFINE_integer('feature_size', 80, help='mel_bins')
 flags.DEFINE_integer('n_fft', 400, help='spectrogram')
 flags.DEFINE_integer('win_length', 400, help='spectrogram')
@@ -110,46 +107,6 @@ def infloop(dataloader):
         epoch += 1
 
 
-def get_transform():
-    feature_args = {
-        'n_fft': FLAGS.n_fft,
-        'win_length': FLAGS.win_length,
-        'hop_length': FLAGS.hop_length,
-        'f_min': 20,
-        'f_max': 5800,
-    }
-    transform = []
-    input_size = FLAGS.feature_size
-    if FLAGS.feature == 'mfcc':
-        transform.append(MFCC(
-            n_mfcc=FLAGS.feature_size, log_mels=True, melkwargs=feature_args))
-    if FLAGS.feature == 'melspec':
-        transform.append(MelSpectrogram(
-            n_mels=FLAGS.feature_size, **feature_args))
-    if FLAGS.feature == 'logfbank':
-        transform.append(FilterbankFeatures(
-            n_filt=FLAGS.feature_size, **feature_args))
-    if FLAGS.delta:
-        transform.append(CatDeltas())
-        input_size = input_size * 3
-    if FLAGS.cmvn:
-        transform.append(CMVN())
-    if FLAGS.downsample > 1:
-        transform.append(Downsample(FLAGS.downsample))
-        input_size = input_size * FLAGS.downsample
-    transform_test = torch.nn.Sequential(*transform)
-
-    if FLAGS.T_mask > 0 and FLAGS.T_num_mask > 0:
-        for _ in range(FLAGS.T_num_mask):
-            transform.append(TimeMasking(FLAGS.T_mask))
-    if FLAGS.F_mask > 0 and FLAGS.F_num_mask > 0:
-        for _ in range(FLAGS.F_num_mask):
-            transform.append(FrequencyMasking(FLAGS.F_mask, FLAGS.F_num_mask))
-    transform_train = torch.nn.Sequential(*transform)
-
-    return transform_train, transform_test, input_size
-
-
 class Trainer:
     def __init__(self):
         self.name = FLAGS.name
@@ -163,7 +120,14 @@ class Trainer:
         FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
-        transform_train, transform_test, input_size = get_transform()
+        transform_train, transform_test, input_size = build_transform(
+            feature_type=FLAGS.feature, feature_size=FLAGS.feature_size,
+            n_fft=FLAGS.n_fft, win_length=FLAGS.win_length,
+            hop_length=FLAGS.hop_length, delta=FLAGS.delta, cmvn=FLAGS.cmvn,
+            downsample=FLAGS.downsample,
+            T_mask=FLAGS.T_mask, T_num_mask=FLAGS.T_num_mask,
+            F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask
+        )
 
         # Tokenizer
         if FLAGS.tokenizer == 'char':
@@ -246,8 +210,6 @@ class Trainer:
                 self.optim, patience=FLAGS.sched_patience,
                 factor=FLAGS.sched_factor, min_lr=FLAGS.sched_min_lr,
                 verbose=1)
-        # Loss
-        self.loss_fn = RNNTLoss(blank=NUL)
         # Apex
         if FLAGS.apex:
             self.model, self.optim = amp.initialize(
@@ -315,6 +277,8 @@ class Trainer:
             loss = self.model(xs, ys, xlen, ylen)
             if FLAGS.multi_gpu:
                 loss = loss.mean() / len(start_idxs)
+            else:
+                loss = loss / len(start_idxs)
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
