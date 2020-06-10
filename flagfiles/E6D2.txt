@@ -1,8 +1,11 @@
 --optim=adam
---lr=0.0005
+--lr=5e-4
 --sched
+--sched_patience=1
+--sched_factor=0.5
+--sched_min_lr=1e-6
 --warmup_step=10000
---epochs=30
+--epochs=60
 --batch_size=32
 --sub_batch_size=32
 --eval_batch_size=4
@@ -17,8 +20,8 @@
 --dec_proj_size=256
 --joint_size=640
 
---audio_max_length=14
---feature=mfcc
+--audio_max_length=16
+--feature=NV
 --feature_size=80
 --n_fft=400
 --win_length=400
@@ -26,13 +29,17 @@
 --nodelta
 --nocmvn
 --downsample=3
+--T_mask=50
+--T_num_mask=2
+--F_mask=5
+--F_num_mask=1
 
 --tokenizer=bpe
---bpe_size=400
---vocab_embed_size=16
+--bpe_size=2048
+--vocab_embed_size=64
 
---save_step=10000
---eval_step=10000
+--save_step=5000
+--eval_step=3000
 --sample_size=20
 
 --apex
