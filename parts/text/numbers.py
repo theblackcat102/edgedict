@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" from https://github.com/keithito/tacotron 
+""" from https://github.com/keithito/tacotron
 Modifed to add support for time and slight tweaks to _expand_number
 """
 
@@ -75,18 +75,22 @@ def _expand_number(m):
         elif num % 100 == 0:
             return _inflect.number_to_words(num // 100) + ' hundred'
         else:
-            return _inflect.number_to_words(num, andword='', zero='oh', group=2).replace(', ', ' ')
+            return _inflect.number_to_words(
+                num, andword='', zero='oh', group=2).replace(', ', ' ')
     # Add check for number phones and other large numbers
     elif num > 1000000000 and num % 10000 != 0:
         return _inflect.number_to_words(num, andword='', group=1)
     else:
         return _inflect.number_to_words(num, andword='')
 
+
 def _expand_time(m):
     mins = int(m.group(2))
     if mins == 0:
         return _inflect.number_to_words(m.group(1))
-    return " ".join([_inflect.number_to_words(m.group(1)), _inflect.number_to_words(m.group(2))])
+    return " ".join([_inflect.number_to_words(m.group(1)),
+                     _inflect.number_to_words(m.group(2))])
+
 
 def normalize_numbers(text):
     text = re.sub(_comma_number_re, _remove_commas, text)

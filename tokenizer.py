@@ -2,7 +2,6 @@ import os
 import tempfile
 import pickle
 
-import torch
 from tokenizers import CharBPETokenizer
 
 NUL = 0
@@ -23,29 +22,6 @@ DEFAULT_TOKEN2ID = {
     UNK_token: UNK,
 }
 DEFAULT_ID2TOKEN = {v: k for k, v in DEFAULT_TOKEN2ID.items()}
-
-
-def zero_pad_concat(feats):
-    # Pad audio feature sets
-    max_t = max(len(feat) for feat in feats)
-    shape = (len(feats), max_t) + feats[0].shape[1:]
-
-    input_mat = torch.zeros(shape)
-    for e, feat in enumerate(feats):
-        input_mat[e, :len(feat)] = feat
-
-    return input_mat
-
-
-def end_pad_concat(texts):
-    # Pad text token sets
-    max_t = max(len(text) for text in texts)
-    shape = (len(texts), max_t)
-
-    labels = torch.full(shape, fill_value=PAD, dtype=torch.long)
-    for e, l in enumerate(texts):
-        labels[e, :len(l)] = l
-    return labels
 
 
 class CharTokenizer:

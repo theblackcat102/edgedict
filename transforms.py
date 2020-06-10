@@ -2,171 +2,179 @@ import random
 
 import torch
 import torchaudio
-import torch.nn as nn
+from torchaudio.transforms import MFCC, MelSpectrogram
 
-from parts.features import FeatureFactory
-
-
-class AudioPreprocessing(nn.Module):
-    """GPU accelerated audio preprocessing
-    """
-    __constants__ = ["optim_level"]
-
-    def __init__(self, **kwargs):
-        nn.Module.__init__(self)    # For PyTorch API
-        self.optim_level = kwargs.get('optimization_level', 0)
-        self.featurizer = FeatureFactory.from_config(kwargs)
-        self.transpose_out = kwargs.get("transpose_out", False)
-
-    @torch.no_grad()
-    def forward(self, input_signal, length):
-        processed_signal = self.featurizer(input_signal, length)
-        processed_length = self.featurizer.get_seq_len(length)
-        if self.transpose_out:
-            processed_signal.transpose_(2, 1)
-            return processed_signal, processed_length
-        else:
-            return processed_signal, processed_length
-
-
-class SpectrogramAugmentation(nn.Module):
-    """Spectrogram augmentation
-    """
-    def __init__(self, **kwargs):
-        nn.Module.__init__(self)
-        self.spec_cutout_regions = SpecCutoutRegions(kwargs)
-        self.spec_augment = SpecAugment(kwargs)
-
-    @torch.no_grad()
-    def forward(self, input_spec):
-        augmented_spec = self.spec_cutout_regions(input_spec)
-        augmented_spec = self.spec_augment(augmented_spec)
-        return augmented_spec
-
-
-class SpecAugment(nn.Module):
-    """Spec augment. refer to https://arxiv.org/abs/1904.08779
-    """
-    def __init__(self, cfg):
-        super(SpecAugment, self).__init__()
-        self.cutout_x_regions = cfg.get('cutout_x_regions', 0)
-        self.cutout_y_regions = cfg.get('cutout_y_regions', 0)
-
-        self.cutout_x_width = cfg.get('cutout_x_width', 10)
-        self.cutout_y_width = cfg.get('cutout_y_width', 10)
-
-    @torch.no_grad()
-    def forward(self, x):
-        sh = x.shape
-
-        mask = torch.zeros(x.shape).byte()
-        for idx in range(sh[0]):
-            for _ in range(self.cutout_x_regions):
-                cutout_x_left = int(
-                    random.uniform(0, sh[1] - self.cutout_x_width))
-
-                mask[idx,
-                     cutout_x_left:cutout_x_left + self.cutout_x_width, :] = 1
-
-            for _ in range(self.cutout_y_regions):
-                cutout_y_left = int(
-                    random.uniform(0, sh[2] - self.cutout_y_width))
-
-                mask[idx, :,
-                     cutout_y_left:cutout_y_left + self.cutout_y_width] = 1
-
-        x = x.masked_fill(mask.to(device=x.device), 0)
-
-        return x
-
-
-class SpecCutoutRegions(nn.Module):
-    """Cutout. refer to https://arxiv.org/pdf/1708.04552.pdf
-    """
-    def __init__(self, cfg):
-        super(SpecCutoutRegions, self).__init__()
-
-        self.cutout_rect_regions = cfg.get('cutout_rect_regions', 0)
-        self.cutout_rect_time = cfg.get('cutout_rect_time', 5)
-        self.cutout_rect_freq = cfg.get('cutout_rect_freq', 20)
-
-    @torch.no_grad()
-    def forward(self, x):
-        sh = x.shape
-
-        mask = torch.zeros(x.shape, dtype=torch.uint8)
-
-        for idx in range(sh[0]):
-            for i in range(self.cutout_rect_regions):
-                cutout_rect_x = int(random.uniform(
-                        0, sh[1] - self.cutout_rect_freq))
-                cutout_rect_y = int(random.uniform(
-                        0, sh[2] - self.cutout_rect_time))
-
-                mask[idx,
-                     cutout_rect_x:cutout_rect_x + self.cutout_rect_freq,
-                     cutout_rect_y:cutout_rect_y + self.cutout_rect_time] = 1
-
-        x = x.masked_fill(mask.to(device=x.device), 0)
-
-        return x
-
-
-class KaldiMFCC(torch.nn.Module):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.kwargs = kwargs
-
-    @torch.no_grad()
-    def forward(self, wave_form):
-        feat = torchaudio.compliance.kaldi.mfcc(
-            wave_form, channel=0, **self.kwargs)
-        return feat
+from parts.features import FilterbankFeatures
 
 
 class CatDeltas(torch.nn.Module):
+    @torch.no_grad()
     def forward(self, feat):
-        d1 = torchaudio.functional.compute_deltas(feat.T)
+        d1 = torchaudio.functional.compute_deltas(feat)
         d2 = torchaudio.functional.compute_deltas(d1)
-        feat = torch.cat([feat, d1.T, d2.T], dim=-1)
+        feat = torch.cat([feat, d1, d2], dim=1)
         return feat
 
 
 class CMVN(torch.nn.Module):
-    eps = 1e-10
+    eps = 1e-5
 
     @torch.no_grad()
     def forward(self, feat):
-        mean = feat.mean(0, keepdim=True)
-        std = feat.std(0, keepdim=True)
+        mean = feat.mean(dim=2, keepdim=True)
+        std = feat.std(dim=2, keepdim=True)
         feat = (feat - mean) / (std + CMVN.eps)
         return feat
 
 
-class Log(torch.nn.Module):
-    @torch.no_grad()
-    def forward(self, mel_spec):
-        log_mel_spec = torch.log(mel_spec + 1e-8)
-        return log_mel_spec
-
-
 class Downsample(torch.nn.Module):
+
     def __init__(self, n_frame):
         super().__init__()
         self.n_frame = n_frame
 
     @torch.no_grad()
     def forward(self, feat):
-        feat_length, feat_size = feat.shape
+        feat = feat.transpose(1, 2)
+        batch_size, feat_length, feat_size = feat.shape
         pad = (self.n_frame - feat_length % self.n_frame) % self.n_frame
-        pad_shape = [0, 0, 0, pad]
+        pad_shape = [0, 0, 0, pad, 0, 0]
         feat = torch.nn.functional.pad(feat, pad_shape)
-        feat = feat.reshape(-1, feat_size * self.n_frame)
+        feat = feat.reshape(batch_size, -1, feat_size * self.n_frame)
 
-        return feat
+        return feat.transpose(1, 2)
 
 
-class Transpose(torch.nn.Module):
-    @torch.no_grad()
-    def forward(self, feat):
-        return feat[0].T
+class FrequencyMasking(torch.nn.Module):
+    """
+    Implements frequency masking transform from SpecAugment paper
+    (https://arxiv.org/abs/1904.08779)
+
+      Example:
+        >>> transforms.Compose([
+        >>>     transforms.ToTensor(),
+        >>>     FrequencyMasking(max_width=10, num_masks=1, use_mean=False),
+        >>> ])
+
+    """
+
+    def __init__(self, max_width, num_masks, use_mean=False):
+        super().__init__()
+        self.max_width = max_width
+        self.num_masks = num_masks
+        self.use_mean = use_mean
+
+    def forward(self, x):
+        """
+        Args:
+            x (Tensor): Tensor image of size (N, T, H) where the frequency
+                mask is to be applied.
+
+        Returns:
+            Tensor: Transformed image with Frequency Mask.
+        """
+        if self.use_mean:
+            fill_value = x.mean()
+        else:
+            fill_value = 0
+        mask = x.new_zeros(x.shape).bool()
+        for i in range(x.shape[0]):
+            for _ in range(self.num_masks):
+                start = random.randrange(0, x.shape[1])
+                end = start + random.randrange(0, self.max_width)
+                mask[i, start:end, :] = 1
+        x = x.masked_fill(mask, value=fill_value)
+        return x
+
+    def __repr__(self):
+        format_string = "%s(max_width=%d,num_masks=%d,use_mean=%s)" % (
+            self.__class__.__name__, self.max_width, self.num_masks,
+            self.use_mean)
+        return format_string
+
+
+class TimeMasking(torch.nn.Module):
+    """
+    Implements time masking transform from SpecAugment paper
+    (https://arxiv.org/abs/1904.08779)
+
+      Example:
+        >>> transforms.Compose([
+        >>>     transforms.ToTensor(),
+        >>>     TimeMasking(max_width=10, num_masks=2, use_mean=False),
+        >>> ])
+
+    """
+
+    def __init__(self, max_width, num_masks, use_mean=False):
+        super().__init__()
+        self.max_width = max_width
+        self.num_masks = num_masks
+        self.use_mean = use_mean
+
+    def forward(self, x):
+        """
+        Args:
+            x (Tensor): Tensor image of size (N, T, H) where the time mask is
+                to be applied.
+
+        Returns:
+            Tensor: Transformed image with Time Mask.
+        """
+        if self.use_mean:
+            fill_value = x.mean()
+        else:
+            fill_value = 0
+        mask = x.new_zeros(x.shape).bool()
+        for i in range(x.shape[0]):
+            for _ in range(self.num_masks):
+                start = random.randrange(0, x.shape[2])
+                end = start + random.randrange(0, self.max_width)
+                mask[i, :, start:end] = 1
+        x = x.masked_fill(mask, value=fill_value)
+        return x
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + "(max_width="
+        format_string += str(self.max_width) + ")"
+        return format_string
+
+
+def build_transform(feature_type, feature_size, n_fft=512, win_length=400,
+                    hop_length=200, delta=False, cmvn=False, downsample=1,
+                    T_mask=0, T_num_mask=0, F_mask=0, F_num_mask=0):
+    feature_args = {
+        'n_fft': n_fft,
+        'win_length': win_length,
+        'hop_length': hop_length,
+        # 'f_min': 20,
+        # 'f_max': 5800,
+    }
+    transform = []
+    input_size = feature_size
+    if feature_type == 'mfcc':
+        transform.append(MFCC(
+            n_mfcc=feature_size, log_mels=True, melkwargs=feature_args))
+    if feature_type == 'melspec':
+        transform.append(MelSpectrogram(
+            n_mels=feature_size, **feature_args))
+    if feature_type == 'logfbank':
+        transform.append(FilterbankFeatures(
+            n_filt=feature_size, **feature_args))
+    if delta:
+        transform.append(CatDeltas())
+        input_size = input_size * 3
+    if cmvn:
+        transform.append(CMVN())
+    if downsample > 1:
+        transform.append(Downsample(downsample))
+        input_size = input_size * downsample
+    transform_test = torch.nn.Sequential(*transform)
+
+    if T_mask > 0 and T_num_mask > 0:
+        transform.append(TimeMasking(T_mask, T_num_mask))
+    if F_mask > 0 and F_num_mask > 0:
+        transform.append(FrequencyMasking(F_mask, F_num_mask))
+    transform_train = torch.nn.Sequential(*transform)
+
+    return transform_train, transform_test, input_size

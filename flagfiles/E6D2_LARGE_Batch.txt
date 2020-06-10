@@ -4,9 +4,9 @@
 --sched_patience=1
 --sched_factor=0.5
 --sched_min_lr=1e-6
---warmup_step=10000
+--warmup_step=1000
 --epochs=60
---batch_size=32
+--batch_size=512
 --sub_batch_size=16
 --eval_batch_size=4
 
@@ -38,8 +38,8 @@
 --bpe_size=2048
 --vocab_embed_size=64
 
---save_step=5000
---eval_step=3000
+--save_step=500
+--eval_step=500
 --sample_size=20
 
 --apex

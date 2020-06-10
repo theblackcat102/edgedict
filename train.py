@@ -3,39 +3,46 @@ from datetime import datetime
 
 import jiwer
 import torch
-import torchaudio.transforms as transforms
 import numpy as np
 import torch.optim as optim
 from absl import app, flags
 from apex import amp
+from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-from tqdm import trange, tqdm
-from warprnnt_pytorch import RNNTLoss
 
-from dataset import (
-    seq_collate, MergedDataset, Librispeech, TEDLIUM, CommonVoice)
 from models import Transducer
-from specaugment import TimeMask, FrequencyMask
-from transforms import CatDeltas, CMVN, Downsample, Transpose, AudioPreprocessing
-from tokenizer import NUL, HuggingFaceTokenizer, CharTokenizer
+from dataset import seq_collate, MergedDataset, Librispeech
+from transforms import build_transform
+from tokenizer import HuggingFaceTokenizer, CharTokenizer
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string('name', 'rnn-t-v3', help='session name')
-flags.DEFINE_string('eval_model', None, help='evaluate and exit')
+flags.DEFINE_string('name', 'rnn-t-v5', help='session name')
+flags.DEFINE_string('evaluate_model', None, help='evaluate and exit')
 flags.DEFINE_string('resume_from', None, help='resume from checkpoint')
 # dataset
-flags.DEFINE_string('LibriSpeech_train', "./data/LibriSpeech/train-clean-360",
+flags.DEFINE_string('LibriSpeech_train_100',
+                    "./datasets/LibriSpeech/train-clean-100",
                     help='LibriSpeech train')
-flags.DEFINE_string('LibriSpeech_test', "./data/LibriSpeech/test-clean",
+flags.DEFINE_string('LibriSpeech_train_360',
+                    "./datasets/LibriSpeech/train-clean-360",
+                    help='LibriSpeech train')
+flags.DEFINE_string('LibriSpeech_train_500',
+                    "./datasets/LibriSpeech/train-other-500",
+                    help='LibriSpeech train')
+flags.DEFINE_string('LibriSpeech_test',
+                    "./datasets/LibriSpeech/test-clean",
                     help='LibriSpeech test')
-flags.DEFINE_string('TEDLIUM_train', "./data/TEDLIUM_release-3/data",
+flags.DEFINE_string('TEDLIUM_train',
+                    "./datasets/TEDLIUM_release-3/data",
                     help='TEDLIUM 3 train')
-flags.DEFINE_string('TEDLIUM_test', "./data/TEDLIUM_release1/test",
+flags.DEFINE_string('TEDLIUM_test',
+                    "./datasets/TEDLIUM_release1/test",
                     help='TEDLIUM 1 test')
-flags.DEFINE_string('CommonVoice', "./data/common_voice",
+flags.DEFINE_string('CommonVoice', "./datasets/common_voice",
                     help='common voice')
+flags.DEFINE_integer('num_workers', 6, help='dataloader workers')
 # learning
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
@@ -52,23 +59,23 @@ flags.DEFINE_float('gradclip', None, help='clip norm value')
 # encoder
 flags.DEFINE_integer('enc_hidden_size', 600, help='encoder hidden dimension')
 flags.DEFINE_integer('enc_layers', 4, help='encoder layers')
-flags.DEFINE_float('enc_dropout', 0, help='encoder dropout')
 flags.DEFINE_integer('enc_proj_size', 600, help='encoder layers')
+flags.DEFINE_float('enc_dropout', 0, help='encoder dropout')
 # decoder
 flags.DEFINE_integer('dec_hidden_size', 150, help='decoder hidden dimension')
 flags.DEFINE_integer('dec_layers', 2, help='decoder layers')
-flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 flags.DEFINE_integer('dec_proj_size', 150, help='encoder layers')
+flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
 # joint
-flags.DEFINE_integer('proj_size', 320, help='RNN hidden dimension')
-flags.DEFINE_integer('joint_size', 512, help='RNN hidden dimension')
+flags.DEFINE_integer('joint_size', 512, help='Joint hidden dimension')
 # tokenizer
 flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
 flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
 flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
 # data preprocess
-flags.DEFINE_integer('audio_max_length', 14, help='max length in seconds')
-flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'NV'], help='audio feature')
+flags.DEFINE_float('audio_max_length', 14, help='max length in seconds')
+flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'logfbank'],
+                  help='audio feature')
 flags.DEFINE_integer('feature_size', 80, help='mel_bins')
 flags.DEFINE_integer('n_fft', 400, help='spectrogram')
 flags.DEFINE_integer('win_length', 400, help='spectrogram')
@@ -101,54 +108,6 @@ def infloop(dataloader):
         epoch += 1
 
 
-def get_transform(mode):
-    # Transform
-    feature_args = {
-        'n_fft': FLAGS.n_fft,
-        'win_length': FLAGS.win_length,
-        'hop_length': FLAGS.hop_length,
-        'f_min': 20,
-        'f_max': 5800,
-    }
-    # feature extraction
-    if FLAGS.feature == 'mfcc':
-        preprocess = transforms.MFCC(
-            log_mels=True,
-            n_mfcc=FLAGS.feature_size,
-            melkwargs=feature_args)
-    if FLAGS.feature == 'melspec':
-        preprocess = transforms.MelSpectrogram(
-            n_mels=FLAGS.feature_size, **feature_args)
-    if FLAGS.feature == 'NV':
-        preprocess = AudioPreprocessing(
-            normalize='per_feature', sample_rate=16000, window_size=0.02,
-            window_stride=0.01, features=FLAGS.feature_size, n_fft=512,
-            feat_type='logfbank', trim_silence=True, window='hann',
-            dither=0.00001, frame_splicing=1, transpose_out=True)
-    transform = []
-    input_size = FLAGS.feature_size
-    if FLAGS.delta:
-        transform.append(CatDeltas())
-        input_size = input_size * 3
-    if FLAGS.cmvn:
-        transform.append(CMVN())
-    if FLAGS.downsample > 1:
-        transform.append(Downsample(FLAGS.downsample))
-        input_size = input_size * FLAGS.downsample
-    if mode == 'train' and FLAGS.T_mask > 0:
-        transform.append(TimeMask(FLAGS.T_mask, FLAGS.T_num_mask))
-    if mode == 'train' and FLAGS.F_mask > 0:
-        transform.append(FrequencyMask(FLAGS.F_mask, FLAGS.F_num_mask))
-    transform = torch.nn.Sequential(*transform)
-    return transform, preprocess, input_size
-
-
-def get_lambda_lr(warmup_step):
-    def get_lr(step):
-        return min((step + 1) / warmup_step, 1.)
-    return get_lr
-
-
 class Trainer:
     def __init__(self):
         self.name = FLAGS.name
@@ -162,8 +121,14 @@ class Trainer:
         FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
-        transform_train, preprocess_train, input_size = get_transform('train')
-        transform_test, preprocess_test, _ = get_transform('test')
+        transform_train, transform_test, input_size = build_transform(
+            feature_type=FLAGS.feature, feature_size=FLAGS.feature_size,
+            n_fft=FLAGS.n_fft, win_length=FLAGS.win_length,
+            hop_length=FLAGS.hop_length, delta=FLAGS.delta, cmvn=FLAGS.cmvn,
+            downsample=FLAGS.downsample,
+            T_mask=FLAGS.T_mask, T_num_mask=FLAGS.T_num_mask,
+            F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask
+        )
 
         # Tokenizer
         if FLAGS.tokenizer == 'char':
@@ -176,22 +141,19 @@ class Trainer:
         self.dataloader_train = DataLoader(
             dataset=MergedDataset([
                 Librispeech(
-                    root='./data/LibriSpeech/train-other-500',
+                    root=FLAGS.LibriSpeech_train_500,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 Librispeech(
-                    root='./data/LibriSpeech/train-clean-360',
+                    root=FLAGS.LibriSpeech_train_360,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 Librispeech(
-                    root='./data/LibriSpeech/train-clean-100',
+                    root=FLAGS.LibriSpeech_train_100,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    preprocess=preprocess_train,
                     audio_max_length=FLAGS.audio_max_length),
                 # TEDLIUM(
                 #     root=FLAGS.TEDLIUM_train,
@@ -204,8 +166,9 @@ class Trainer:
                 #     transform=transform_train,
                 #     audio_max_length=FLAGS.audio_max_length)
             ]),
-            batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
-            collate_fn=seq_collate, drop_last=True)
+            batch_size=FLAGS.batch_size, shuffle=True,
+            num_workers=FLAGS.num_workers, collate_fn=seq_collate,
+            drop_last=True)
 
         self.dataloader_val = DataLoader(
             dataset=MergedDataset([
@@ -213,10 +176,9 @@ class Trainer:
                     root=FLAGS.LibriSpeech_test,
                     tokenizer=self.tokenizer,
                     transform=transform_test,
-                    preprocess=preprocess_test,
                     reverse_sorted_by_length=True)]),
-            batch_size=FLAGS.eval_batch_size, shuffle=False, num_workers=4,
-            collate_fn=seq_collate)
+            batch_size=FLAGS.eval_batch_size, shuffle=False,
+            num_workers=FLAGS.num_workers, collate_fn=seq_collate)
 
         self.tokenizer.build(self.dataloader_train.dataset.texts())
         self.vocab_size = self.dataloader_train.dataset.tokenizer.vocab_size
@@ -250,8 +212,6 @@ class Trainer:
                 self.optim, patience=FLAGS.sched_patience,
                 factor=FLAGS.sched_factor, min_lr=FLAGS.sched_min_lr,
                 verbose=1)
-        # Loss
-        self.loss_fn = RNNTLoss(blank=NUL)
         # Apex
         if FLAGS.apex:
             self.model, self.optim = amp.initialize(
@@ -304,21 +264,19 @@ class Trainer:
                             epoch, step, val_loss, wer))
 
     def train_step(self, batch):
-        batch = [x.to(device) for x in batch]
         sub_losses = []
         start_idxs = range(0, FLAGS.batch_size, FLAGS.sub_batch_size)
         self.optim.zero_grad()
         for sub_batch_idx, start_idx in enumerate(start_idxs):
             sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
-            xs, ys, xlen, ylen = [x[sub_slice] for x in batch]
+            xs, ys, xlen, ylen = [x[sub_slice].to(device) for x in batch]
             xs = xs[:, :xlen.max()].contiguous()
             ys = ys[:, :ylen.max()].contiguous()
-            # prob = self.model(xs, ys)
-            # xlen = self.scale_length(prob, xlen)
-            # loss = self.loss_fn(prob, ys, xlen, ylen) / len(start_idxs)
             loss = self.model(xs, ys, xlen, ylen)
             if FLAGS.multi_gpu:
                 loss = loss.mean() / len(start_idxs)
+            else:
+                loss = loss / len(start_idxs)
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
@@ -396,7 +354,7 @@ class Trainer:
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(FLAGS.eval_model)
+        checkpoint = torch.load(FLAGS.evaluate_model)
         self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:
@@ -420,8 +378,8 @@ class Trainer:
 def main(argv):
     trainer = Trainer()
 
-    if FLAGS.eval_model:
-        trainer.load(FLAGS.eval_model)
+    if FLAGS.evaluate_model:
+        trainer.load(FLAGS.evaluate_model)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
             print('True: %s\n\nPred:%s' % (pred_seq, true_seq))

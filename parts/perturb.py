@@ -14,8 +14,8 @@
 
 import random
 import librosa
-from .manifest import Manifest
-from .segment import AudioSegment
+# from .manifest import Manifest
+# from .segment import AudioSegment
 
 
 class Perturbation(object):
@@ -51,7 +51,6 @@ class GainPerturbation(Perturbation):
     def perturb(self, data):
         gain = self._rng.uniform(self._min_gain_dbfs, self._max_gain_dbfs)
         data._samples = data._samples * (10. ** (gain / 20.))
-
 
 
 class ShiftPerturbation(Perturbation):
