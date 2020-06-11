@@ -142,7 +142,7 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
             output_container.mux(packet)
         output_container.close()
 
-BLOOMBERG_LIVE = 'https://www.youtube.com/watch?v=dp8PhLsUcFE'
+BLOOMBERG_LIVE = 'https://www.youtube.com/watch?v=2EppLNonncc'
 
 if __name__ == "__main__":
     '''
