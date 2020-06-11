@@ -7,7 +7,7 @@
 --warmup_step=10000
 --epochs=60
 --batch_size=32
---sub_batch_size=16
+--sub_batch_size=32
 --eval_batch_size=4
 
 --enc_hidden_size=1024

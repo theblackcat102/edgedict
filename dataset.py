@@ -1,106 +1,15 @@
 import glob
 import os
 import pickle
-import string
-import re
 
 import numpy as np
 import pandas as pd
 import torchaudio
 import torch
-from unidecode import unidecode
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
 from tokenizer import PAD
-from parts.text.numbers import normalize_numbers
-
-
-class TextCleaner:
-    def __init__(self):
-        self.standard_chars = [
-            " ", "'", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
-            "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
-            "w", "x", "y", "z"
-        ]
-        self.standard_chars_set = set(self.standard_chars)
-
-        punctuation = string.punctuation
-        punctuation = punctuation.replace("+", "")
-        punctuation = punctuation.replace("&", "")
-        punctuation = punctuation.replace("@", "")
-        punctuation = punctuation.replace("%", "")
-        for char in self.standard_chars:
-            punctuation = punctuation.replace(char, "")
-        self.punctuation = str.maketrans(punctuation, " " * len(punctuation))
-
-        self.abbreviations = [
-            (re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [
-                ('mrs', 'misess'),
-                ('mr', 'mister'),
-                ('dr', 'doctor'),
-                ('st', 'saint'),
-                ('co', 'company'),
-                ('jr', 'junior'),
-                ('maj', 'major'),
-                ('gen', 'general'),
-                ('drs', 'doctors'),
-                ('rev', 'reverend'),
-                ('lt', 'lieutenant'),
-                ('hon', 'honorable'),
-                ('sgt', 'sergeant'),
-                ('capt', 'captain'),
-                ('esq', 'esquire'),
-                ('ltd', 'limited'),
-                ('col', 'colonel'),
-                ('ft', 'fort'),
-            ]]
-        self.whitespace_re = re.compile(r'\s+')
-
-    def expand_abbreviations(self, text):
-        for regex, replacement in self.abbreviations:
-            text = re.sub(regex, replacement, text)
-        return text
-
-    def expand_numbers(self, text):
-        return normalize_numbers(text)
-
-    def lowercase(self, text):
-        return text.lower()
-
-    def collapse_whitespace(self, text):
-        return re.sub(self.whitespace_re, ' ', text)
-
-    def convert_to_ascii(self, text):
-        return unidecode(text)
-
-    def remove_punctuation(self, text):
-        text = text.translate(self.punctuation)
-        text = re.sub(r'&', " and ", text)
-        text = re.sub(r'\+', " plus ", text)
-        text = re.sub(r'@', " at ", text)
-        text = re.sub(r'%', " percent ", text)
-        return text
-
-    def english_cleaners(self, text):
-        text = self.convert_to_ascii(text)
-        text = self.lowercase(text)
-        text = self.expand_numbers(text)
-        text = self.expand_abbreviations(text)
-        text = self.remove_punctuation(text)
-        text = self.collapse_whitespace(text)
-        return text
-
-    def normalize(self, text):
-        def good_token(token):
-            for t in token:
-                if t not in self.standard_chars_set:
-                    return False
-            return True
-
-        text = self.english_cleaners(text).strip()
-        text = ''.join([token for token in text if good_token(token)])
-        return text
 
 
 class MergedDataset(ConcatDataset):
@@ -122,8 +31,7 @@ class MergedDataset(ConcatDataset):
 class AudioDataset(Dataset):
     def __init__(self, root, tokenizer, session='', desc='AudioDataset',
                  transform=None, audio_min_length=0, audio_max_length=999,
-                 sampling_rate=16000, reverse_sorted_by_length=False,
-                 normalize_text=False):
+                 sampling_rate=16000, reverse_sorted_by_length=False):
         self.root = root
         processed_labels = os.path.join(
             root, 'preprocessed_v3_%s.pkl' % session)
@@ -152,14 +60,11 @@ class AudioDataset(Dataset):
             pickle.dump(data, open(processed_labels, 'wb'))
 
         # length limits and text cleaning
-        text_cleaner = TextCleaner()
         total_secs = 0
         filtered_secs = 0
         self.data = []
         for x in data:
             if audio_min_length <= x['audio_length'] <= audio_max_length:
-                if normalize_text:
-                    x['text'] = text_cleaner.normalize(x['text'])
                 self.data.append(x)
                 total_secs += x['audio_length']
             else:
@@ -337,40 +242,34 @@ if __name__ == "__main__":
     from tokenizer import CharTokenizer
     from torchaudio.transforms import MFCC
 
-    from transforms import CatDeltas, CMVN, Downsample
+    from transforms import build_transform
 
-    transform = torch.nn.Sequential(
-        MFCC(
-            n_mfcc=80,
-            melkwargs={
-                'n_fft': 400,
-                'win_length': 400,
-                'hop_length': 200,
-                'f_min': 20,
-                'f_max': 5800
-            }),
-        CatDeltas(),
-        CMVN(),
-        Downsample(3)
+    transform_train, transform_test, input_size = build_transform(
+        feature_type='logfbank', feature_size=80,
+        n_fft=512, win_length=320,
+        hop_length=160, delta=False, cmvn=False,
+        downsample=3,
+        T_mask=50, T_num_mask=2,
+        F_mask=5, F_num_mask=1
     )
     tokenizer = CharTokenizer(cache_dir='/tmp')
     train_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                root='./data/LibriSpeech/train-other-500',
+                root='./datasets/LibriSpeech/train-other-500',
                 tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+                transform=transform_train,
+                audio_max_length=16),
             Librispeech(
-                root='./data/LibriSpeech/train-clean-360',
+                root='./datasets/LibriSpeech/train-clean-360',
                 tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+                transform=transform_train,
+                audio_max_length=16),
             Librispeech(
-                root='./data/LibriSpeech/train-clean-100',
+                root='./datasets/LibriSpeech/train-clean-100',
                 tokenizer=tokenizer,
-                transforms=transform,
-                audio_max_length=14),
+                transform=transform_train,
+                audio_max_length=16),
             # TEDLIUM(
             #     root="./data/TEDLIUM_release-3/data",
             #     tokenizer=tokenizer,
@@ -387,15 +286,15 @@ if __name__ == "__main__":
             #     transforms=transform,
             #     audio_max_length=14)
         ]),
-        batch_size=4, shuffle=True, num_workers=4,
+        batch_size=128, shuffle=True, num_workers=32,
         collate_fn=seq_collate, drop_last=True)
 
     val_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                './data/LibriSpeech/test-clean',
+                './datasets/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
-                transforms=transform),
+                transform=transform_test),
             # Librispeech(
             #     './data/LibriSpeech/dev-clean',
             #     tokenizer=tokenizer,
@@ -417,14 +316,14 @@ if __name__ == "__main__":
             #     tokenizer=tokenizer,
             #     transforms=transform)
         ]),
-        batch_size=4, shuffle=False, num_workers=4,
+        batch_size=128, shuffle=False, num_workers=32,
         collate_fn=seq_collate)
 
     tokenizer.build(train_dataloader.dataset.texts())
     print("==========================")
     for xs, ys, xlen, ylen in tqdm(train_dataloader):
         pass
-        print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
     for xs, ys, xlen, ylen in tqdm(val_dataloader):
         pass

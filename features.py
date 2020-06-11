@@ -43,7 +43,7 @@ class FilterbankFeatures(nn.Module):
                  hop_length=160,
                  n_fft=512,
                  window="hann",
-                 normalize="per_feature",
+                 normalize="none",
                  log=True,
                  dither=1e-5,
                  pad_to=0,

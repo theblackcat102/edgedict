@@ -6,6 +6,5 @@ tensorflow
 tokenizers
 tqdm
 ipython
-inflect
 librosa
-Unidecode
+onnxruntime

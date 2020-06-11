@@ -31,6 +31,7 @@ class ResLayerNormLSTM(nn.Module):
                  time_reductions=[1],
                  reduction_factor=2):
         super().__init__()
+        self.hidden_size = hidden_size
         self.lstms = nn.ModuleList()
         self.projs = nn.ModuleList()
         for i in range(num_layers):
@@ -46,21 +47,24 @@ class ResLayerNormLSTM(nn.Module):
 
     def forward(self, xs, hiddens=None):
         if hiddens is None:
-            hiddens = [None for _ in range(len(self.lstms))]
+            hs = xs.new_zeros(len(self.lstms), xs.shape[0], self.hidden_size)
+            cs = xs.new_zeros(len(self.lstms), xs.shape[0], self.hidden_size)
         else:
-            hs, cs = hiddens[0].unsqueeze(1), hiddens[1].unsqueeze(1)
-            hiddens = zip(hs, cs)
-        new_hiddens = []
-        for lstm, proj, hidden in zip(self.lstms, self.projs, hiddens):
+            hs, cs = hiddens
+        new_hs = []
+        new_cs = []
+        for i, (lstm, proj) in enumerate(zip(self.lstms, self.projs)):
             lstm.flatten_parameters()
-            xs_next, new_hidden = lstm(xs, hidden)
-            if xs.shape == xs_next.shape:
-                xs_next = xs + xs_next
-            xs = proj(xs_next)
-            new_hiddens.append(new_hidden)
-        hs, cs = zip(*new_hiddens)
-        hs = torch.cat(hs, dim=0)
-        cs = torch.cat(cs, dim=0)
+            xs_next, (h, c) = lstm(xs, (hs[i, None], cs[i, None]))
+            if i != 0:
+                xs = xs + xs_next
+            else:
+                xs = xs_next
+            xs = proj(xs)
+            new_hs.append(h)
+            new_cs.append(c)
+        hs = torch.cat(new_hs, dim=0)
+        cs = torch.cat(new_cs, dim=0)
         return xs, (hs, cs)
 
 
@@ -73,11 +77,11 @@ class Encoder(nn.Module):
             input_size, hidden_size, num_layers, dropout=dropout)
         self.proj = nn.Linear(hidden_size, proj_size)
 
-    def forward(self, xs, hidden=None):
+    def forward(self, xs, hiddens=None):
         xs = self.norm(xs)
-        xs, hidden = self.lstm(xs, hidden)
+        xs, hiddens = self.lstm(xs, hiddens)
         xs = self.proj(xs)
-        return xs, hidden
+        return xs, hiddens
 
 
 class Decoder(nn.Module):
