@@ -7,18 +7,15 @@ from tokenizers import CharBPETokenizer
 NUL = 0
 PAD = 1
 BOS = 2
-EOS = 3
-UNK = 4
+UNK = 3
 NUL_token = '<nul>'
 PAD_token = '<pad>'
 BOS_token = '<bos>'
-EOS_token = '<eos>'
 UNK_token = '<unk>'
 DEFAULT_TOKEN2ID = {
     NUL_token: NUL,
     PAD_token: PAD,
     BOS_token: BOS,
-    EOS_token: EOS,
     UNK_token: UNK,
 }
 DEFAULT_ID2TOKEN = {v: k for k, v in DEFAULT_TOKEN2ID.items()}
@@ -53,7 +50,7 @@ class CharTokenizer:
         text = str(text).lower()
         text = text[:max_length]
         text = [self.token2id.get(char, UNK) for char in text]
-        return text + [EOS]
+        return text
 
     def decode(self, tokens):
         text = ''.join([self.id2token[token] for token in tokens])
@@ -76,13 +73,22 @@ class HuggingFaceTokenizer:
         self.name = "%d-%s" % (vocab_size, max_length)
         self.tokenizer = None
 
+        vocab = os.path.join(self.cache_dir, self.name + '-vocab.json')
+        merges = os.path.join(self.cache_dir, self.name + '-merges.txt')
+        if os.path.exists(vocab) and os.path.exists(merges):
+            self.tokenizer = CharBPETokenizer(vocab, merges)
+            print('Using cached HuggingFaceTokenizer')
+
     def build(self, texts):
+        if self.tokenizer is not None:
+            return
+
         tmp_file = tempfile.NamedTemporaryFile()
 
         with open(tmp_file.name, "w") as f:
             f.write(' '.join(texts).lower())
 
-        self.tokenizer = CharBPETokenizer()
+        self.tokenizer = CharBPETokenizer(lowercase=True)
         self.tokenizer.train(
             [tmp_file.name],
             vocab_size=self.vocab_size,
@@ -90,15 +96,14 @@ class HuggingFaceTokenizer:
                 NUL_token,
                 PAD_token,
                 BOS_token,
-                EOS_token,
+                UNK_token,
             ],
         )
         os.makedirs(self.cache_dir, exist_ok=True)
         self.tokenizer.save(self.cache_dir, self.name)
 
     def encode(self, text):
-        text = "%s %s %s" % (BOS_token, text.lower(), EOS_token)
-        token_ids = self.tokenizer.encode(text).ids
+        token_ids = self.tokenizer.encode(text.lower()).ids
         token_ids = token_ids[:self.max_length]
 
         return token_ids

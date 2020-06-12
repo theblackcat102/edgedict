@@ -4,7 +4,7 @@ import torch
 import torchaudio
 from torchaudio.transforms import MFCC, MelSpectrogram
 
-from features import FilterbankFeatures
+from rnnt.features import FilterbankFeatures
 
 
 class CatDeltas(torch.nn.Module):

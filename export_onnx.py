@@ -3,16 +3,14 @@ import os
 import numpy as np
 import onnxruntime
 import torch.onnx
-import torch.nn as nn
 from absl import app, flags
 
-import train                                    # define training FLAGS
-from transforms import build_transform
-from tokenizer import HuggingFaceTokenizer
-from models import Transducer, Encoder, ResLayerNormLSTM
+from rnnt.args import FLAGS                             # define training FLAGS
+from rnnt.transforms import build_transform
+from rnnt.tokenizer import HuggingFaceTokenizer
+from rnnt.models import Transducer
 
 
-FLAGS = flags.FLAGS
 flags.DEFINE_string('model_dir', None, help='path to root dir of log')
 flags.DEFINE_integer('step', None, help='steps of checkpoint')
 flags.DEFINE_integer('n_frame', 4, help='input frame(stacked)')
@@ -54,6 +52,7 @@ def export_encoder(transducer, input_size, vocab_size):
     )
 
     session = onnxruntime.InferenceSession(path)
+    print(session)
     inputs = {
         'input': x.detach().numpy(),
         'input_hidden': x_h.detach().numpy(),
@@ -68,7 +67,10 @@ def export_encoder(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y_c.detach().numpy(), onnx_y_c, rtol=1e-03, atol=1e-05)
 
+    print("=" * 40)
     print("Encoder has been exported")
+    for name in input_names:
+        print("%-12s : %s" % (name, str(inputs[name].shape)))
 
 
 def export_decoder(transducer, input_size, vocab_size):
@@ -118,7 +120,10 @@ def export_decoder(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y_c.detach().numpy(), onnx_y_c, rtol=1e-03, atol=1e-05)
 
+    print("=" * 40)
     print("Decoder has been exported")
+    for name in input_names:
+        print("%-12s : %s" % (name, str(inputs[name].shape)))
 
 
 def export_join(transducer, input_size, vocab_size):
@@ -157,7 +162,10 @@ def export_join(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y.detach().numpy(), onnx_y, rtol=1e-03, atol=1e-05)
 
+    print("=" * 40)
     print("Joint has been exported")
+    for name in input_names:
+        print("%-12s : %s" % (name, str(inputs[name].shape)))
 
 
 def main(argv):

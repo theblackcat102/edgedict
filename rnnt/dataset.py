@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from tqdm import tqdm
 
-from tokenizer import PAD
+from rnnt.tokenizer import PAD
 
 
 class MergedDataset(ConcatDataset):
@@ -99,12 +99,14 @@ class AudioDataset(Dataset):
         except Exception:
             print("Failt to load %s, closed" % path)
             exit(0)
-        data = self.transform(data[:1])
+        if self.transform is not None:
+            data = self.transform(data[:1])[0].T
+        else:
+            data = data[0]
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
-
-        return data[0].T, tokens
+        return data, tokens
 
 
 class YoutubeCaption(AudioDataset):
@@ -240,8 +242,6 @@ def seq_collate(results):
 
 if __name__ == "__main__":
     from tokenizer import CharTokenizer
-    from torchaudio.transforms import MFCC
-
     from transforms import build_transform
 
     transform_train, transform_test, input_size = build_transform(

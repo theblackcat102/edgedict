@@ -1,102 +1,22 @@
 import os
-from datetime import datetime
 
 import jiwer
 import torch
 import numpy as np
 import torch.optim as optim
-from absl import app, flags
+from absl import app
 from apex import amp
 from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
-from models import Transducer
-from dataset import seq_collate, MergedDataset, Librispeech
-from transforms import build_transform
-from tokenizer import HuggingFaceTokenizer, CharTokenizer
+from rnnt.args import FLAGS
+from rnnt.dataset import seq_collate, MergedDataset, Librispeech
+from rnnt.models import Transducer
+from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
+from rnnt.transforms import build_transform
 
 
-FLAGS = flags.FLAGS
-flags.DEFINE_string('name', 'rnn-t-v5', help='session name')
-flags.DEFINE_string('evaluate_model', None, help='evaluate and exit')
-flags.DEFINE_string('resume_from', None, help='resume from checkpoint')
-# dataset
-flags.DEFINE_string('LibriSpeech_train_100',
-                    "./datasets/LibriSpeech/train-clean-100",
-                    help='LibriSpeech train')
-flags.DEFINE_string('LibriSpeech_train_360',
-                    "./datasets/LibriSpeech/train-clean-360",
-                    help='LibriSpeech train')
-flags.DEFINE_string('LibriSpeech_train_500',
-                    "./datasets/LibriSpeech/train-other-500",
-                    help='LibriSpeech train')
-flags.DEFINE_string('LibriSpeech_test',
-                    "./datasets/LibriSpeech/test-clean",
-                    help='LibriSpeech test')
-flags.DEFINE_string('TEDLIUM_train',
-                    "./datasets/TEDLIUM_release-3/data",
-                    help='TEDLIUM 3 train')
-flags.DEFINE_string('TEDLIUM_test',
-                    "./datasets/TEDLIUM_release1/test",
-                    help='TEDLIUM 1 test')
-flags.DEFINE_string('CommonVoice', "./datasets/common_voice",
-                    help='common voice')
-flags.DEFINE_integer('num_workers', 6, help='dataloader workers')
-# learning
-flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
-flags.DEFINE_float('lr', 1e-4, help='initial lr')
-flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')
-flags.DEFINE_integer('sched_patience', 1, help='lr reduce rate on plateau')
-flags.DEFINE_float('sched_factor', 0.5, help='lr reduce rate on plateau')
-flags.DEFINE_float('sched_min_lr', 1e-6, help='lr reduce rate on plateau')
-flags.DEFINE_integer('warmup_step', 10000, help='linearly warmup lr')
-flags.DEFINE_integer('epochs', 30, help='epoch')
-flags.DEFINE_integer('batch_size', 8, help='batch size')
-flags.DEFINE_integer('sub_batch_size', 8, help='accumulate batch size')
-flags.DEFINE_integer('eval_batch_size', 4, help='evaluation batch size')
-flags.DEFINE_float('gradclip', None, help='clip norm value')
-# encoder
-flags.DEFINE_integer('enc_hidden_size', 600, help='encoder hidden dimension')
-flags.DEFINE_integer('enc_layers', 4, help='encoder layers')
-flags.DEFINE_integer('enc_proj_size', 600, help='encoder layers')
-flags.DEFINE_float('enc_dropout', 0, help='encoder dropout')
-# decoder
-flags.DEFINE_integer('dec_hidden_size', 150, help='decoder hidden dimension')
-flags.DEFINE_integer('dec_layers', 2, help='decoder layers')
-flags.DEFINE_integer('dec_proj_size', 150, help='encoder layers')
-flags.DEFINE_float('dec_dropout', 0., help='decoder dropout')
-# joint
-flags.DEFINE_integer('joint_size', 512, help='Joint hidden dimension')
-# tokenizer
-flags.DEFINE_enum('tokenizer', 'char', ['char', 'bpe'], help='tokenizer')
-flags.DEFINE_integer('bpe_size', 256, help='BPE vocabulary size')
-flags.DEFINE_integer('vocab_embed_size', 16, help='vocabulary embedding size')
-# data preprocess
-flags.DEFINE_float('audio_max_length', 14, help='max length in seconds')
-flags.DEFINE_enum('feature', 'mfcc', ['mfcc', 'melspec', 'logfbank'],
-                  help='audio feature')
-flags.DEFINE_integer('feature_size', 80, help='mel_bins')
-flags.DEFINE_integer('n_fft', 400, help='spectrogram')
-flags.DEFINE_integer('win_length', 400, help='spectrogram')
-flags.DEFINE_integer('hop_length', 200, help='spectrogram')
-flags.DEFINE_bool('delta', False, help='concat delta and detal of dealt')
-flags.DEFINE_bool('cmvn', False, help='normalize spectrogram')
-flags.DEFINE_integer('downsample', 3, help='downsample audio feature')
-flags.DEFINE_integer('T_mask', 50, help='downsample audio feature')
-flags.DEFINE_integer('T_num_mask', 2, help='downsample audio feature')
-flags.DEFINE_integer('F_mask', 5, help='downsample audio feature')
-flags.DEFINE_integer('F_num_mask', 1, help='downsample audio feature')
-# apex
-flags.DEFINE_bool('apex', default=True, help='fp16 training')
-flags.DEFINE_string('opt_level', 'O1', help='use mix precision')
-# parallel
-flags.DEFINE_bool('multi_gpu', False, help='DataParallel')
-# log
-flags.DEFINE_integer('loss_step', 5, help='frequency to show loss in pbar')
-flags.DEFINE_integer('save_step', 10000, help='frequency to save model')
-flags.DEFINE_integer('eval_step', 10000, help='frequency to save model')
-flags.DEFINE_integer('sample_size', 20, help='size of visualized examples')
 device = torch.device('cuda:0')
 
 
@@ -111,14 +31,8 @@ def infloop(dataloader):
 class Trainer:
     def __init__(self):
         self.name = FLAGS.name
-        current = datetime.now().strftime('%Y%m%d-%H%M%S')
-        self.logdir = os.path.join('logs', '%s-%s' % (FLAGS.name, current))
+        self.logdir = os.path.join('logs', FLAGS.name)
         self.model_dir = os.path.join(self.logdir, 'models')
-        os.makedirs(self.model_dir, exist_ok=True)
-        self.writer = SummaryWriter(self.logdir)
-        self.writer.add_text(
-            'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
-        FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
         transform_train, transform_test, input_size = build_transform(
@@ -225,11 +139,21 @@ class Trainer:
         xlen = (xlen / scale).ceil().int()
         return xlen
 
-    def train(self):
+    def train(self, start_step=1):
+        if FLAGS.mode == "resume":
+            exist_ok = True
+        else:
+            exist_ok = False
+        os.makedirs(self.model_dir, exist_ok=exist_ok)
+        writer = SummaryWriter(self.logdir)
+        writer.add_text(
+            'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
+        FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
+
         looper = infloop(self.dataloader_train)
         losses = []
         steps = len(self.dataloader_train) * FLAGS.epochs
-        with trange(1, steps + 1, dynamic_ncols=True) as pbar:
+        with trange(start_step, steps + 1, dynamic_ncols=True) as pbar:
             for step in pbar:
                 if step <= FLAGS.warmup_step:
                     scale = step / FLAGS.warmup_step
@@ -244,7 +168,7 @@ class Trainer:
                 if step % FLAGS.loss_step == 0:
                     train_loss = torch.stack(losses).mean()
                     losses = []
-                    self.writer.add_scalar('train_loss', train_loss, step)
+                    writer.add_scalar('train_loss', train_loss, step)
 
                 if step % FLAGS.save_step == 0:
                     self.save(step)
@@ -254,11 +178,11 @@ class Trainer:
                     val_loss, wer, pred_seqs, true_seqs = self.evaluate()
                     if FLAGS.sched:
                         self.sched.step(val_loss)
-                    self.writer.add_scalar('WER', wer, step)
-                    self.writer.add_scalar('val_loss', val_loss, step)
+                    writer.add_scalar('WER', wer, step)
+                    writer.add_scalar('val_loss', val_loss, step)
                     for i in range(FLAGS.sample_size):
                         log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
-                        self.writer.add_text('val/%d' % i, log, step)
+                        writer.add_text('val/%d' % i, log, step)
                     pbar.write(
                         'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
                             epoch, step, val_loss, wer))
@@ -340,9 +264,9 @@ class Trainer:
         checkpoint = {'optim': self.optim.state_dict()}
 
         if FLAGS.multi_gpu:
-            checkpoint = {'model': self.model.module.state_dict()}
+            checkpoint.update({'model': self.model.module.state_dict()})
         else:
-            checkpoint = {'model': self.model.state_dict()}
+            checkpoint.update({'model': self.model.state_dict()})
 
         if self.sched is not None:
             checkpoint.update({'sched': self.sched.state_dict()})
@@ -350,12 +274,12 @@ class Trainer:
         if FLAGS.apex:
             checkpoint.update({'amp': amp.state_dict()})
 
-        path = os.path.join(self.model_dir, 'epoch-%d' % step)
+        path = os.path.join(self.model_dir, '%d.pt' % step)
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(FLAGS.evaluate_model)
-        self.optim.load_state_dict(checkpoint['optim'])
+        checkpoint = torch.load(path)
+        # self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:
             self.model.module.load_state_dict(checkpoint['model'])
@@ -378,18 +302,25 @@ class Trainer:
 def main(argv):
     trainer = Trainer()
 
-    if FLAGS.evaluate_model:
-        trainer.load(FLAGS.evaluate_model)
+    if FLAGS.mode == 'eval':
+        path = os.path.join(trainer.model_dir, '%d.pt' % FLAGS.resume_step)
+        trainer.load(path)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
             print('True: %s\n\nPred:%s' % (pred_seq, true_seq))
             print('=' * 20)
         print('Evaluate, loss: %.4f, WER: %.4f' % (val_loss, wer))
-    else:
-        if FLAGS.resume_from:
-            trainer.load(FLAGS.resume_from)
-        trainer.sanity_check()
-        trainer.train()
+
+    step = 1
+
+    if FLAGS.mode == 'resume':
+        step = FLAGS.resume_step
+        path = os.path.join(trainer.model_dir, '%d.pt' % step)
+        trainer.load(path)
+
+    if FLAGS.mode == 'train' or FLAGS.mode == 'resume':
+        # trainer.sanity_check()
+        trainer.train(start_step=step)
 
 
 if __name__ == "__main__":

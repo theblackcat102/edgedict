@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from warprnnt_pytorch import RNNTLoss
 
-from tokenizer import NUL, BOS
+from tokenizer import NUL, BOS, PAD
 
 
 class TimeReduction(nn.Module):
@@ -88,7 +88,8 @@ class Decoder(nn.Module):
     def __init__(self, vocab_embed_size, vocab_size, hidden_size, num_layers,
                  dropout=0, proj_size=None):
         super().__init__()
-        self.embed = nn.Embedding(vocab_size, vocab_embed_size)
+        self.embed = nn.Embedding(
+            vocab_size, vocab_embed_size, padding_idx=PAD)
         self.lstm = nn.LSTM(
             vocab_embed_size, hidden_size, num_layers,
             batch_first=True, dropout=dropout)
