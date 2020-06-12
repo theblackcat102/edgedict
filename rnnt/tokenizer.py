@@ -76,7 +76,7 @@ class HuggingFaceTokenizer:
         vocab = os.path.join(self.cache_dir, self.name + '-vocab.json')
         merges = os.path.join(self.cache_dir, self.name + '-merges.txt')
         if os.path.exists(vocab) and os.path.exists(merges):
-            self.tokenizer = CharBPETokenizer(vocab, merges)
+            self.tokenizer = CharBPETokenizer(vocab, merges, lowercase=True)
             print('Using cached HuggingFaceTokenizer')
 
     def build(self, texts):
@@ -109,11 +109,12 @@ class HuggingFaceTokenizer:
         return token_ids
 
     def decode(self, tokens, skip_special_tokens=True):
-        text = self.tokenizer.decode(
-            list(tokens),
-            skip_special_tokens=skip_special_tokens,
-        )
-        return text
+        text = self.tokenizer.decode(                   # My special tokens
+            tokens,
+            # [token for token in tokens if token > 3],   # aren't skipped
+            skip_special_tokens=skip_special_tokens,    # even I set fucking
+        )                                               # skip_special_tokens
+        return text                                     # to True
 
     def decode_plus(self, token_batch):
         sentences = []

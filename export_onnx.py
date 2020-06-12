@@ -11,18 +11,18 @@ from rnnt.tokenizer import HuggingFaceTokenizer
 from rnnt.models import Transducer
 
 
-flags.DEFINE_string('model_dir', None, help='path to root dir of log')
 flags.DEFINE_integer('step', None, help='steps of checkpoint')
-flags.DEFINE_integer('n_frame', 4, help='input frame(stacked)')
-flags.mark_flags_as_required(['model_dir', 'step'])
+flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
+flags.mark_flags_as_required(['step'])
 
 
-def export_encoder(transducer, input_size, vocab_size):
-    assert FLAGS.n_frame % 2 == 0, ("n_frame must be divisible by "
-                                    "reduction_factor of TimeReduction")
+def export_encoder(transducer, input_size, vocab_size, logdir):
+    print("=" * 40)
+    assert FLAGS.step_n_frame % 2 == 0, ("step_n_frame must be divisible by "
+                                         "reduction_factor of TimeReduction")
     encoder = transducer.encoder
     encoder.eval()
-    x = torch.rand(1, FLAGS.n_frame, input_size, requires_grad=True)
+    x = torch.rand(1, FLAGS.step_n_frame, input_size, requires_grad=True)
     x_h = torch.rand(
         FLAGS.enc_layers, 1, FLAGS.enc_hidden_size, requires_grad=True)
     x_c = torch.rand(
@@ -31,7 +31,7 @@ def export_encoder(transducer, input_size, vocab_size):
 
     input_names = ['input', 'input_hidden', 'input_cell']
     output_names = ['output', 'output_hidden', 'output_cell']
-    path = os.path.join(FLAGS.model_dir, 'encoder.onnx')
+    path = os.path.join(logdir, 'encoder.onnx')
     torch.onnx.export(
         encoder,
         (x, (x_h, x_c)),
@@ -39,6 +39,7 @@ def export_encoder(transducer, input_size, vocab_size):
         export_params=True,
         opset_version=10,
         do_constant_folding=True,
+        example_outputs=(y, (y_h, y_c)),
         input_names=input_names,
         output_names=output_names,
         dynamic_axes={
@@ -48,11 +49,11 @@ def export_encoder(transducer, input_size, vocab_size):
             'output': {0: 'batch_size'},
             'output_hidden': {1: 'batch_size'},
             'output_cell': {1: 'batch_size'},
-        }
+        },
+        verbose=True
     )
 
     session = onnxruntime.InferenceSession(path)
-    print(session)
     inputs = {
         'input': x.detach().numpy(),
         'input_hidden': x_h.detach().numpy(),
@@ -67,13 +68,15 @@ def export_encoder(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y_c.detach().numpy(), onnx_y_c, rtol=1e-03, atol=1e-05)
 
-    print("=" * 40)
     print("Encoder has been exported")
     for name in input_names:
         print("%-12s : %s" % (name, str(inputs[name].shape)))
+    for name, value in zip(output_names, [onnx_y, onnx_y_h, onnx_y_c]):
+        print("%-12s : %s" % (name, str(value.shape)))
 
 
-def export_decoder(transducer, input_size, vocab_size):
+def export_decoder(transducer, input_size, vocab_size, logdir):
+    print("=" * 40)
     decoder = transducer.decoder
     decoder.eval()
     x = torch.randint(0, vocab_size, size=(1, 1))
@@ -85,7 +88,7 @@ def export_decoder(transducer, input_size, vocab_size):
 
     input_names = ['input', 'input_hidden', 'input_cell']
     output_names = ['output', 'output_hidden', 'output_cell']
-    path = os.path.join(FLAGS.model_dir, 'decoder.onnx')
+    path = os.path.join(logdir, 'decoder.onnx')
     torch.onnx.export(
         decoder,
         (x, (x_h, x_c)),
@@ -102,7 +105,8 @@ def export_decoder(transducer, input_size, vocab_size):
             'output': {0: 'batch_size'},
             'output_hidden': {1: 'batch_size'},
             'output_cell': {1: 'batch_size'},
-        }
+        },
+        verbose=True
     )
 
     session = onnxruntime.InferenceSession(path)
@@ -120,13 +124,15 @@ def export_decoder(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y_c.detach().numpy(), onnx_y_c, rtol=1e-03, atol=1e-05)
 
-    print("=" * 40)
     print("Decoder has been exported")
     for name in input_names:
         print("%-12s : %s" % (name, str(inputs[name].shape)))
+    for name, value in zip(output_names, [onnx_y, onnx_y_h, onnx_y_c]):
+        print("%-12s : %s" % (name, str(value.shape)))
 
 
-def export_join(transducer, input_size, vocab_size):
+def export_join(transducer, input_size, vocab_size, logdir):
+    print("=" * 40)
     joint = transducer.joint
     joint.eval()
     h_enc = torch.rand(1, FLAGS.enc_proj_size, requires_grad=True)
@@ -135,7 +141,7 @@ def export_join(transducer, input_size, vocab_size):
 
     input_names = ['input_h_enc', 'input_h_dec']
     output_names = ['output']
-    path = os.path.join(FLAGS.model_dir, 'joint.onnx')
+    path = os.path.join(logdir, 'joint.onnx')
     torch.onnx.export(
         joint,
         (h_enc, h_dec),
@@ -143,13 +149,15 @@ def export_join(transducer, input_size, vocab_size):
         export_params=True,
         opset_version=10,
         do_constant_folding=True,
+        example_outputs=y,
         input_names=input_names,
         output_names=output_names,
         dynamic_axes={
             'input_h_enc': {0: 'batch_size'},
             'input_h_dec': {0: 'batch_size'},
             'output': {0: 'batch_size'},
-        }
+        },
+        verbose=True
     )
 
     session = onnxruntime.InferenceSession(path)
@@ -162,18 +170,21 @@ def export_join(transducer, input_size, vocab_size):
     np.testing.assert_allclose(
         y.detach().numpy(), onnx_y, rtol=1e-03, atol=1e-05)
 
-    print("=" * 40)
     print("Joint has been exported")
     for name in input_names:
         print("%-12s : %s" % (name, str(inputs[name].shape)))
+    for name, value in zip(output_names, [onnx_y]):
+        print("%-12s : %s" % (name, str(value.shape)))
 
 
 def main(argv):
-    assert FLAGS.n_frame % 2 == 0, ("n_frame must be divisible by "
-                                    "reduction_factor of TimeReduction")
+    assert FLAGS.step_n_frame % 2 == 0, ("step_n_frame must be divisible by "
+                                         "reduction_factor of TimeReduction")
+
+    logdir = os.path.join('logs', FLAGS.name)
 
     tokenizer = HuggingFaceTokenizer(
-        cache_dir=FLAGS.model_dir, vocab_size=FLAGS.bpe_size)
+        cache_dir=logdir, vocab_size=FLAGS.bpe_size)
 
     transform_train, transform_test, input_size = build_transform(
         feature_type=FLAGS.feature, feature_size=FLAGS.feature_size,
@@ -184,8 +195,7 @@ def main(argv):
         F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask
     )
 
-    model_path = os.path.join(
-        FLAGS.model_dir, 'models', 'epoch-%d' % FLAGS.step)
+    model_path = os.path.join(logdir, 'models', '%d.pt' % FLAGS.step)
     checkpoint = torch.load(model_path, lambda storage, loc: storage)
     transducer = Transducer(
         vocab_embed_size=FLAGS.vocab_embed_size,
@@ -204,9 +214,9 @@ def main(argv):
     transducer.load_state_dict(checkpoint['model'])
     transducer.eval()
 
-    export_encoder(transducer, input_size, tokenizer.vocab_size)
-    export_decoder(transducer, input_size, tokenizer.vocab_size)
-    export_join(transducer, input_size, tokenizer.vocab_size)
+    export_encoder(transducer, input_size, tokenizer.vocab_size, logdir)
+    export_decoder(transducer, input_size, tokenizer.vocab_size, logdir)
+    export_join(transducer, input_size, tokenizer.vocab_size, logdir)
 
 
 if __name__ == '__main__':

@@ -102,7 +102,10 @@ pip install git+https://github.com/mcfletch/sphfile.git
 
 - Export pytorch model to ONNX format
     ```
-    python export_onnx.py --flagfile ./logs/E6D2-Adam-NV-20200609-141601/flagfile.txt --model_dir ./logs/E6D2-Adam-NV-20200609-141601 --step 90000
+    python export_onnx.py \
+        --flagfile ./logs/E6D2-smallbatch/flagfile.txt \
+        --step 15000 \
+        --step_n_frame 10
     ```
 
 - Install OpenVINO inference engine Python API
@@ -119,13 +122,28 @@ pip install git+https://github.com/mcfletch/sphfile.git
         ```
     - Encoder
         ```
-        python3 /opt/intel/openvino/deployment_tools/model_optimizer//mo.py --framework onnx --input_model ./logs/E6D2-Adam-NV-20200609-141601/encoder.onnx --model_name encoder --output_dir ./logs/E6D2-Adam-NV-20200609-141601/ --input "input[1 4 240],input_hidden[6 1 1024],input_cell[6 1 1024]"
+        python3 /opt/intel/openvino/deployment_tools/model_optimizer/mo.py \
+            --framework onnx \
+            --input_model ./logs/E6D2-smallbatch/encoder.onnx \
+            --model_name encoder \
+            --input "input[1 10 240],input_hidden[6 1 1024],input_cell[6 1 1024]" \
+            --output_dir ./logs/E6D2-smallbatch/
         ```
     - Decoder
         ```
-        python3 /opt/intel/openvino/deployment_tools/model_optimizer//mo.py --framework onnx --input_model ./logs/E6D2-Adam-NV-20200609-141601/decoder.onnx --model_name decoder --output_dir ./logs/E6D2-Adam-NV-20200609-141601/ --input "input[1 1]{i32},input_hidden[2 1 256],input_cell[2 1 256]"
+        python3 /opt/intel/openvino/deployment_tools/model_optimizer/mo.py \
+            --framework onnx \
+            --input_model ./logs/E6D2-smallbatch/decoder.onnx \
+            --model_name decoder \
+            --input "input[1 1]{i32},input_hidden[2 1 256],input_cell[2 1 256]" \
+            --output_dir ./logs/E6D2-smallbatch/
         ```
     - Joint
         ```
-        python3 /opt/intel/openvino/deployment_tools/model_optimizer//mo.py --framework onnx --input_model ./logs/E6D2-Adam-NV-20200609-141601/joint.onnx --model_name joint --output_dir ./logs/E6D2-Adam-NV-20200609-141601/ --input "input_h_enc[1 640],input_h_dec[1 256]"
+        python3 /opt/intel/openvino/deployment_tools/model_optimizer/mo.py \
+            --framework onnx \
+            --input_model ./logs/E6D2-smallbatch/joint.onnx \
+            --model_name joint \
+            --input "input_h_enc[1 640],input_h_dec[1 256]" \
+            --output_dir ./logs/E6D2-smallbatch/
         ```

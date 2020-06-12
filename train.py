@@ -238,7 +238,7 @@ class Trainer:
                     sample_nums = FLAGS.sample_size - len(pred_seqs)
                     pred_seqs.extend(pred_seq[:sample_nums])
                     true_seqs.extend(true_seq[:sample_nums])
-                    pbar.set_description('wer: %.4f' % wer)
+                    pbar.set_description('wer: %.4f, loss: %.4f' % (wer, loss))
         loss = np.mean(losses)
         wer = np.mean(wers)
         self.model.train()
@@ -278,7 +278,7 @@ class Trainer:
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(path, lambda storage, loc: storage)
+        checkpoint = torch.load(path)
         # self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:

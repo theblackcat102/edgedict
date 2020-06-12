@@ -13,10 +13,10 @@ class TimeReduction(nn.Module):
 
     def forward(self, xs):
         batch_size, xlen, hidden_size = xs.shape
-        pad = self.reduction_factor - xlen % self.reduction_factor
-        pad = pad % self.reduction_factor
-        pad_shape = [0, 0, 0, pad, 0, 0]
-        xs = nn.functional.pad(xs, pad_shape)
+        # pad = self.reduction_factor - xlen % self.reduction_factor
+        # pad = pad % self.reduction_factor
+        # pad_shape = [0, 0, 0, pad, 0, 0]
+        # xs = nn.functional.pad(xs, pad_shape)
         xs = xs.reshape(batch_size, -1, self.reduction_factor, hidden_size)
         xs = xs.mean(dim=-2)
         return xs
