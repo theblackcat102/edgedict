@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from warprnnt_pytorch import RNNTLoss
 
-from tokenizer import NUL, BOS, PAD
+from rnnt.tokenizer import NUL, BOS, PAD
 
 
 class TimeReduction(nn.Module):

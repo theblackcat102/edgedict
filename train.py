@@ -17,7 +17,7 @@ from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
 
 
-device = torch.device('cuda:0')
+device = torch.device('cpu')
 
 
 def infloop(dataloader):
@@ -278,7 +278,7 @@ class Trainer:
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, lambda storage, loc: storage)
         # self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:

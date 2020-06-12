@@ -29,17 +29,23 @@ class CMVN(torch.nn.Module):
 
 class Downsample(torch.nn.Module):
 
-    def __init__(self, n_frame):
+    def __init__(self, n_frame, pad_to_divisible=True):
         super().__init__()
         self.n_frame = n_frame
+        self.pad_to_divisible = pad_to_divisible
 
     @torch.no_grad()
     def forward(self, feat):
         feat = feat.transpose(1, 2)
         batch_size, feat_length, feat_size = feat.shape
-        pad = (self.n_frame - feat_length % self.n_frame) % self.n_frame
-        pad_shape = [0, 0, 0, pad, 0, 0]
-        feat = torch.nn.functional.pad(feat, pad_shape)
+        if self.pad_to_divisible:
+            pad = (self.n_frame - feat_length % self.n_frame) % self.n_frame
+            pad_shape = [0, 0, 0, pad, 0, 0]
+            feat = torch.nn.functional.pad(feat, pad_shape)
+        else:
+            feat_length = feat_length - feat_length % self.n_frame
+            feat = feat[:, :feat_length, :]
+
         feat = feat.reshape(batch_size, -1, feat_size * self.n_frame)
 
         return feat.transpose(1, 2)
@@ -142,7 +148,8 @@ class TimeMasking(torch.nn.Module):
 
 def build_transform(feature_type, feature_size, n_fft=512, win_length=400,
                     hop_length=200, delta=False, cmvn=False, downsample=1,
-                    T_mask=0, T_num_mask=0, F_mask=0, F_num_mask=0):
+                    T_mask=0, T_num_mask=0, F_mask=0, F_num_mask=0,
+                    pad_to_divisible=True):
     feature_args = {
         'n_fft': n_fft,
         'win_length': win_length,
@@ -167,7 +174,7 @@ def build_transform(feature_type, feature_size, n_fft=512, win_length=400,
     if cmvn:
         transform.append(CMVN())
     if downsample > 1:
-        transform.append(Downsample(downsample))
+        transform.append(Downsample(downsample, pad_to_divisible))
         input_size = input_size * downsample
     transform_test = torch.nn.Sequential(*transform)
 
