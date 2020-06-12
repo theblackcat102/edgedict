@@ -25,7 +25,7 @@
 --feature_size=80
 --n_fft=512
 --win_length=320
---hop_length=160
+--hop_length=200
 --nodelta
 --nocmvn
 --downsample=3

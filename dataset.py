@@ -103,7 +103,6 @@ class AudioDataset(Dataset):
 
         texts = self.data[idx]['text']
         tokens = torch.from_numpy(np.array(self.tokenizer.encode(texts)))
-
         return data[0].T, tokens
 
 

@@ -19,8 +19,8 @@ from tokenizer import HuggingFaceTokenizer, CharTokenizer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('name', 'rnn-t-v5', help='session name')
-flags.DEFINE_string('evaluate_model', None, help='evaluate and exit')
-flags.DEFINE_string('resume_from', None, help='resume from checkpoint')
+flags.DEFINE_enum('mode', 'train', ['train', 'resume', 'eval'], help='mode')
+flags.DEFINE_integer('resume_step', None, help='model step')
 # dataset
 flags.DEFINE_string('LibriSpeech_train_100',
                     "./datasets/LibriSpeech/train-clean-100",
@@ -111,14 +111,8 @@ def infloop(dataloader):
 class Trainer:
     def __init__(self):
         self.name = FLAGS.name
-        current = datetime.now().strftime('%Y%m%d-%H%M%S')
-        self.logdir = os.path.join('logs', '%s-%s' % (FLAGS.name, current))
+        self.logdir = os.path.join('logs', FLAGS.name)
         self.model_dir = os.path.join(self.logdir, 'models')
-        os.makedirs(self.model_dir, exist_ok=True)
-        self.writer = SummaryWriter(self.logdir)
-        self.writer.add_text(
-            'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
-        FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
 
         # Transform
         transform_train, transform_test, input_size = build_transform(
@@ -225,11 +219,21 @@ class Trainer:
         xlen = (xlen / scale).ceil().int()
         return xlen
 
-    def train(self):
+    def train(self, start_step=1):
+        if FLAGS.mode == "resume":
+            exist_ok = True
+        else:
+            exist_ok = False
+        os.makedirs(self.model_dir, exist_ok=exist_ok)
+        writer = SummaryWriter(self.logdir)
+        writer.add_text(
+            'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
+        FLAGS.append_flags_into_file(os.path.join(self.logdir, 'flagfile.txt'))
+
         looper = infloop(self.dataloader_train)
         losses = []
         steps = len(self.dataloader_train) * FLAGS.epochs
-        with trange(1, steps + 1, dynamic_ncols=True) as pbar:
+        with trange(start_step, steps + 1, dynamic_ncols=True) as pbar:
             for step in pbar:
                 if step <= FLAGS.warmup_step:
                     scale = step / FLAGS.warmup_step
@@ -244,7 +248,7 @@ class Trainer:
                 if step % FLAGS.loss_step == 0:
                     train_loss = torch.stack(losses).mean()
                     losses = []
-                    self.writer.add_scalar('train_loss', train_loss, step)
+                    writer.add_scalar('train_loss', train_loss, step)
 
                 if step % FLAGS.save_step == 0:
                     self.save(step)
@@ -254,11 +258,11 @@ class Trainer:
                     val_loss, wer, pred_seqs, true_seqs = self.evaluate()
                     if FLAGS.sched:
                         self.sched.step(val_loss)
-                    self.writer.add_scalar('WER', wer, step)
-                    self.writer.add_scalar('val_loss', val_loss, step)
+                    writer.add_scalar('WER', wer, step)
+                    writer.add_scalar('val_loss', val_loss, step)
                     for i in range(FLAGS.sample_size):
                         log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
-                        self.writer.add_text('val/%d' % i, log, step)
+                        writer.add_text('val/%d' % i, log, step)
                     pbar.write(
                         'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
                             epoch, step, val_loss, wer))
@@ -340,9 +344,9 @@ class Trainer:
         checkpoint = {'optim': self.optim.state_dict()}
 
         if FLAGS.multi_gpu:
-            checkpoint = {'model': self.model.module.state_dict()}
+            checkpoint.update({'model': self.model.module.state_dict()})
         else:
-            checkpoint = {'model': self.model.state_dict()}
+            checkpoint.update({'model': self.model.state_dict()})
 
         if self.sched is not None:
             checkpoint.update({'sched': self.sched.state_dict()})
@@ -350,12 +354,12 @@ class Trainer:
         if FLAGS.apex:
             checkpoint.update({'amp': amp.state_dict()})
 
-        path = os.path.join(self.model_dir, 'epoch-%d' % step)
+        path = os.path.join(self.model_dir, '%d.pt' % step)
         torch.save(checkpoint, path)
 
     def load(self, path):
-        checkpoint = torch.load(FLAGS.evaluate_model)
-        self.optim.load_state_dict(checkpoint['optim'])
+        checkpoint = torch.load(path)
+        # self.optim.load_state_dict(checkpoint['optim'])
 
         if FLAGS.multi_gpu:
             self.model.module.load_state_dict(checkpoint['model'])
@@ -378,18 +382,25 @@ class Trainer:
 def main(argv):
     trainer = Trainer()
 
-    if FLAGS.evaluate_model:
-        trainer.load(FLAGS.evaluate_model)
+    if FLAGS.mode == 'eval':
+        path = os.path.join(trainer.model_dir, '%d.pt' % FLAGS.resume_step)
+        trainer.load(path)
         val_loss, wer, pred_seqs, true_seqs = trainer.evaluate()
         for pred_seq, true_seq in zip(pred_seqs, true_seqs):
             print('True: %s\n\nPred:%s' % (pred_seq, true_seq))
             print('=' * 20)
         print('Evaluate, loss: %.4f, WER: %.4f' % (val_loss, wer))
-    else:
-        if FLAGS.resume_from:
-            trainer.load(FLAGS.resume_from)
-        trainer.sanity_check()
-        trainer.train()
+
+    step = 1
+
+    if FLAGS.mode == 'resume':
+        step = FLAGS.resume_step
+        path = os.path.join(trainer.model_dir, '%d.pt' % step)
+        trainer.load(path)
+
+    if FLAGS.mode == 'train' or FLAGS.mode == 'resume':
+        # trainer.sanity_check()
+        trainer.train(start_step=step)
 
 
 if __name__ == "__main__":
