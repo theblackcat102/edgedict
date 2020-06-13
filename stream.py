@@ -40,7 +40,7 @@ parser = argparse.ArgumentParser(description='RNN-T')
 parser.add_argument('--name', type=str)
 parser.add_argument('-w', '--window-size', type=float, default=0.02)
 parser.add_argument('-m', '--mode', type=str, default='greedy', choices=['greedy', 'beam'])
-
+parser.add_argument('-u', '--url', type=str, default='https://www.youtube.com/watch?v=dp8PhLsUcFE')
 eval_args = parser.parse_args()
 
 class Struct:

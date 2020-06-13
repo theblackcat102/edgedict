@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import subprocess
 import av
 import numpy as np
-from stream import transforms, model, _tokenizer, test_wav, window_size
+from stream import transforms, model, _tokenizer, test_wav, window_size, eval_args
 import torchaudio
 import torch
 import torch.nn.functional as F
@@ -154,14 +154,12 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
             output_container.mux(packet)
         output_container.close()
 
-BLOOMBERG_LIVE = 'https://www.youtube.com/watch?v=2EppLNonncc'
-
 if __name__ == "__main__":
     '''
         youtube-dl
         pip install av
     '''
-    command = ['youtube-dl', '-f', '91', '-g', BLOOMBERG_LIVE]
+    command = ['youtube-dl', '-f', '91', '-g', eval_args.url]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, bufsize=10**8)
     out, err = proc.communicate()
     stream_url = out.decode("utf-8").strip()
