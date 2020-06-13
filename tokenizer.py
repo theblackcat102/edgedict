@@ -2,6 +2,7 @@ import string
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch import Tensor
+from parts.text.cleaners import english_cleaners
 
 BOS = 1
 
@@ -35,6 +36,7 @@ class CharTokenizer():
             '<blank>': 0,
             '<bos>': 1,
             '<unk>': 2,
+            
         }
 
         self.id2token = {}
@@ -72,11 +74,11 @@ from tokenizers import CharBPETokenizer
 
 class HuggingFaceTokenizer():
 
-    def __init__(self, tokenizers=None, cleaner=None):
+    def __init__(self, tokenizers=None, cleaner=english_cleaners):
         if tokenizers == None:
             tokenizers = CharBPETokenizer(
-                './BPE-1000/-vocab.json',
-                './BPE-1000/-merges.txt',
+                './BPE-1024/-vocab.json',
+                './BPE-1024/-merges.txt',
                 lowercase=True,
             )
         punctuation = string.punctuation
@@ -121,43 +123,22 @@ if __name__ == "__main__":
     import pandas as pd
     import os
     import pickle
-    from parts.text.cleaners import english_cleaners
-    punctuation = string.punctuation
-    punctuation = punctuation.replace("+", "")
-    punctuation = punctuation.replace("&", "")
-    table = str.maketrans(punctuation, " " * len(punctuation))
-    ### We might also want to consider:
-    ### @ -> at
-    ### # -> number, pound, hashtag
-    ### ~ -> tilde
-    ### _ -> underscore
-    ### % -> percent
-    # If a punctuation symbol is inside our vocab, we do not remove from text
-    # for l in labels:
-    #     punctuation = punctuation.replace(l, "")
-    # Turn all punctuation to whitespace
     caption_texts = [
-        ('../TEDLIUM/TEDLIUM_release1/train/preprocessed_label.csv.pt', 'text'),
-        ('../LibriSpeech/train-clean-360/preprocessed_label.csv.pt', 'text'),
-        ('../LibriSpeech/train-other-500/preprocessed_label.csv.pt', 'text'),
-        ('../common_voice/preprocessed_train.csv.pt', 'sentence'),
-        ('../youtube-speech-text/preprocessed_english_meta.csv.pt', 'Normalized Transcription'),
-        ('../youtube-speech-text/preprocessed_english2_meta.csv.pt', 'Normalized Transcription'),
-        ('../youtube-speech-text/preprocessed_bloomberg_meta.csv.pt', 'Normalized Transcription'),
+        ('../TEDLIUM/TEDLIUM_release1/train/preprocessed_label.csv', 'text'),
+        ('../LibriSpeech/train-clean-360/preprocessed_label.csv', 'text'),
+        ('../common_voice/preprocessed_train.csv', 'sentence'),
+        # ('../youtube-speech-text/preprocessed_english_meta.csv', 'Normalized Transcription')
     ]
-    if not os.path.exists('raw_corpus_clean.txt'):
-        with open('raw_corpus_clean.txt', 'w') as f:
+    if not os.path.exists('raw_corpus.txt'):
+        with open('raw_corpus.txt', 'w') as f:
             for csv_filename, col_name in caption_texts:
-                with open(csv_filename, 'rb') as g:
-                    data = pickle.load(g)
-                # texts = list(pd.read_csv(csv_filename)[col_name])
-                for e in data:
-                    t = e['text']
-                    t = english_cleaners(t, table=table)
+                texts = list(pd.read_csv(csv_filename)[col_name])
+                for t in texts:
                     t.replace('<eos>', '')
                     f.write(t+'\n')
     tokenizer = CharBPETokenizer(lowercase=True)
-    tokenizer.train(["raw_corpus_clean.txt"], vocab_size=1024,
+
+    tokenizer.train(["raw_corpus.txt"], vocab_size=1000,
         min_frequency=2,
         special_tokens=[
             "<blank>",
@@ -166,12 +147,12 @@ if __name__ == "__main__":
         ],
     )
 
-    os.makedirs('./BPE-1024', exist_ok=True)
-    tokenizer.save_model(f'./BPE-1024/', name='')
+    # os.makedirs('./BPE-1000', exist_ok=True)
+    tokenizer.save(f'./BPE-1000','')
 
     tokenizer = CharBPETokenizer(
-        './BPE-1024/-vocab.json',
-        './BPE-1024/-merges.txt'
+        './BPE-1000/-vocab.json',
+        './BPE-1000/-merges.txt'
     )    
     # with open('.test.pkl', 'w') as f:
     #     pickle.dump(tokenizer, f)
