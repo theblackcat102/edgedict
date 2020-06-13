@@ -7,10 +7,9 @@ from stream import transforms, model, _tokenizer, test_wav, window_size
 import torchaudio
 import torch
 import torch.nn.functional as F
+import logging
 
-resample = torchaudio.transforms.Resample(
-    orig_freq=44*1000, new_freq=16*1000
-)
+av.logging.set_level(30)
 
 frames = 4
 single_input_chunk = int(16*1000 * window_size * 3 - 1)
