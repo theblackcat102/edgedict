@@ -3,8 +3,13 @@ import numpy as np
 import torch
 from torch import nn, autograd
 import torch.nn.functional as F
-from warprnnt_pytorch import RNNTLoss
 from ctc_decoder import decode as ctc_beam
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+from recurrent import ResidualRNNModel
+from tokenizer import BOS
+
+def fast_tanh(x):
+    return x / (1 + x.abs())
 
 class RNNModel(nn.Module):
     def __init__(self, input_size, vocab_size, hidden_size, num_layers, dropout=.2, blank=0, bidirectional=False):
@@ -13,12 +18,17 @@ class RNNModel(nn.Module):
         self.num_layers = num_layers
         self.vocab_size = vocab_size
         self.blank = blank
+        # normalize spectrum feature
+        self.spectrum_norm = nn.BatchNorm1d(input_size)
         # lstm hidden vector: (h_0, c_0) num_layers * num_directions, batch, hidden_size
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         if bidirectional: hidden_size *= 2
         self.linear = nn.Linear(hidden_size, vocab_size)
 
     def forward(self, xs, hid=None):
+        xs = xs.permute(0, 2, 1)
+        xs = self.spectrum_norm(xs)
+        xs = xs.permute(0, 2, 1)
         h, hid = self.lstm(xs, hid)
         return self.linear(h), hid
 
@@ -35,69 +45,78 @@ class RNNModel(nn.Module):
         return ctc_beam(logp.data.cpu().numpy(), W)
 
 class Transducer(nn.Module):
-    def __init__(self, input_size, vocab_size, vocab_embed_size, hidden_size, num_layers, dropout=.5, blank=0, bidirectional=False):
+    def __init__(self, input_size, vocab_size, vocab_embed_size, hidden_size, num_layers, pred_hidden_size=-1, pred_num_layers=1,dropout=.2, blank=0, bidirectional=False):
         super(Transducer, self).__init__()
         self.blank = blank
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.loss = RNNTLoss()
+        if pred_hidden_size == -1:
+            pred_hidden_size = hidden_size
         # NOTE encoder & decoder only use lstm
-        self.encoder = RNNModel(input_size, hidden_size, hidden_size, num_layers, dropout, bidirectional=bidirectional)
-        self.embed = nn.Embedding(vocab_size, vocab_embed_size, padding_idx=blank)
+        self.encoder = ResidualRNNModel(input_size, hidden_size, hidden_size, num_layers, dropout, bidirectional=False)
+        self.embed = nn.Embedding(vocab_size, vocab_embed_size, padding_idx=1)
         # self.embed.weight.data[1:] = torch.eye(vocab_embed_size)
         # self.embed.weight.requires_grad = False
         # self.decoder = RNNModel(vocab_embed_size, vocab_size, hidden_size, 1, dropout)
-        self.decoder = nn.LSTM(vocab_embed_size, hidden_size, 1, batch_first=True, dropout=dropout)
-        self.fc1 = nn.Linear(2*hidden_size, hidden_size)
+        self.decoder = nn.LSTM(vocab_embed_size, pred_hidden_size, pred_num_layers, batch_first=True, dropout=dropout)
+        self.fc1 = nn.Linear(hidden_size+pred_hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, vocab_size)
 
     def joint(self, f, g):
         ''' `f`: encoder lstm output (B,T,U,2H)
         `g`: decoder lstm output (B,T,U,H)
         NOTE f and g must have the same size except the last dim'''
-        dim = len(f.shape) - 1
-        out = torch.cat((f, g), dim=dim)
-        out = F.tanh(self.fc1(out))
+        out = torch.cat((f, g), dim=-1)
+        out = fast_tanh(self.fc1(out))
         return self.fc2(out)
 
-    def forward(self, xs, ys, xlen, ylen):
-        xs, _ = self.encoder(xs)
+    def forward(self, i_xs, ys, xlen, ylen):
+        xs, _ = self.encoder(i_xs)
         # concat first zero
-        zero = autograd.Variable(torch.zeros((ys.shape[0], 1)).long())
-        if ys.is_cuda: zero = zero.cuda()
-        ymat = torch.cat((zero, ys), dim=1)
-        # forwoard pm
-        ymat = self.embed(ymat)
-        ymat, _ = self.decoder(ymat)
+        bos = ys.new_ones((ys.shape[0], 1)).long() * BOS
+        h_pre = torch.cat([bos, ys.long()], dim=-1)
+        ymat, _ = self.decoder(self.embed(h_pre))
         xs = xs.unsqueeze(dim=2)
         ymat = ymat.unsqueeze(dim=1)
         # expand 
         sz = [max(i, j) for i, j in zip(xs.size()[:-1], ymat.size()[:-1])]
         xs = xs.expand(torch.Size(sz+[xs.shape[-1]])); ymat = ymat.expand(torch.Size(sz+[ymat.shape[-1]]))
         out = self.joint(xs, ymat)
-        if ys.is_cuda:
-            xlen = xlen.cuda()
-            ylen = ylen.cuda()
-        loss = self.loss(out, ys.int(), xlen, ylen)
-        return loss
+        # loss = self.loss(out, ys.int(), xlen, ylen)
+        return out
 
-    def greedy_decode(self, x, bos_idx=1):
-        x = self.encoder(x)[0][0]
-        vy = autograd.Variable(torch.LongTensor([bos_idx])).view(1,1) # vector preserve for embedding
-        if x.is_cuda: vy = vy.cuda()
-        y, h = self.decoder(self.embed(vy)) # decode first zero 
-        y_seq = []; logp = 0
-        for i in x:
-            ytu = self.joint(i, y[0][0])
-            out = F.log_softmax(ytu, dim=0)
-            p, pred = torch.max(out, dim=0) # suppose blank = -1
-            pred = int(pred); logp += float(p)
-            if pred != self.blank:
-                y_seq.append(pred)
-                vy.data[0][0] = pred # change pm state
-                y, h = self.decoder(self.embed(vy), h)
-        return y_seq, -logp
+    def greedy_decode(self, xs, xlen):
+        # encoder
+        h_enc, _ = self.encoder(xs)
+        # initialize decoder
+        bos = xs.new_ones(xs.shape[0], 1).long() * BOS
+        h_pre, (h, c) = self.decoder(self.embed(bos))     # decode first zero
+        y_seq = []
+        log_p = []
+        # greedy
+        for i in range(h_enc.shape[1]):
+            # joint
+            logits = self.joint(h_enc[:, i], h_pre[:, 0])
+            probs = F.log_softmax(logits, dim=1)
+            prob, pred = torch.max(probs, dim=1)
+            y_seq.append(pred)
+            log_p.append(prob)
+            embed_pred = self.embed(pred.unsqueeze(1))
+            new_h_pre, (new_h, new_c) = self.decoder(embed_pred, (h, c))
+            # replace non blank entities with new state
+            h_pre[pred != self.blank, ...] = new_h_pre[pred != self.blank, ...]
+            h[:, pred != self.blank, :] = new_h[:, pred != self.blank, :]
+            c[:, pred != self.blank, :] = new_c[:, pred != self.blank, :]
+        y_seq = torch.stack(y_seq, dim=1)
+        log_p = torch.stack(log_p, dim=1).sum(dim=1)
+        ret_y = []
+        # truncat to xlen and remove blank token
+        for seq, seq_len in zip(y_seq, xlen):
+            seq = seq.cpu().numpy()[:seq_len]
+            ret_y.append(list(filter(lambda tok: tok != self.blank, seq)))
+        return ret_y, -log_p
+
 
 
     def beam_search(self, xs, W=10, prefix=False, bos_idx=1):
@@ -180,7 +199,7 @@ class Transducer(nn.Module):
             B = B[:W]
 
         # return highest probability sequence
-        print(B[0])
+        # print(B[0])
         return B[0].k, -B[0].logp
 
 
@@ -192,7 +211,7 @@ class Sequence():
     def __init__(self, seq=None, blank=0):
         if seq is None:
             self.g = [] # predictions of phoneme language model
-            self.k = [blank] # prediction phoneme label
+            self.k = [1] # prediction phoneme label
             # self.h = [None] # input hidden vector to phoneme model
             self.h = None
             self.logp = 0 # probability of this sequence, in log scale
@@ -202,19 +221,21 @@ class Sequence():
             self.h = seq.h
             self.logp = seq.logp
 
-    def __str__(self):
-        return 'Prediction: {}\nlog-likelihood {:.2f}\n'.format(' '.join([rephone[i] for i in self.k]), -self.logp)
-
 
 if __name__ == "__main__":
     import torch
     from torch.autograd import Variable
     import numpy as np
 
-    model = Transducer(128, 3600, 64, 2).cuda()
+    model = Transducer(128,3600,8 ,64, 4).cuda()
     x = torch.randn((32, 128, 128)).float().cuda()
     y = torch.randint(0, 3500, (32, 10)).long().cuda()
     xlen = torch.from_numpy(np.array([128]*32)).int()
     ylen = torch.from_numpy(np.array([10]*32)).int()
+
+    # x = pad_sequence(x, batch_first=True)
+    # x = pack_padded_sequence(x, lengths=xlen, batch_first=True)
+
     loss = model(x, y, xlen, ylen)
-    print(loss)
+    # loss.backward()
+    # print(loss)

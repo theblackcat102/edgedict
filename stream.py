@@ -11,7 +11,8 @@ from tokenizer import HuggingFaceTokenizer, CharTokenizer
 import json
 import sounddevice as sd
 import soundfile as sf
-
+from parts.features import AudioPreprocessing
+from parts.text.cleaners import english_cleaners
 from recurrent import MFCC_
 from augmentation import ConcatFeature
 from pydub import AudioSegment, effects  
@@ -21,8 +22,23 @@ import sys
 from speechpy.processing import cmvn, cmvnw
 
 
+'''
+server:  AudioPreprocessing(
+        normalize='none', sample_rate=16000, window_size=0.02, 
+        window_stride=0.015, features=args.audio_feat, n_fft=512, log=True,
+        feat_type='logfbank', trim_silence=True, window='hann',dither=0.00001, frame_splicing=1, transpose_out=False
+    ),
+rust:   AudioPreprocessing(
+        normalize='none', sample_rate=16000, window_size=0.02, 
+        window_stride=0.01, features=args.audio_feat, n_fft=512, log=True,
+        feat_type='logfbank', trim_silence=True, window='hann',dither=0.00001, frame_splicing=1, transpose_out=False
+    ),
+
+'''
+
 parser = argparse.ArgumentParser(description='RNN-T')
 parser.add_argument('--name', type=str)
+parser.add_argument('-w', '--window-size', type=float, default=0.02)
 parser.add_argument('-m', '--mode', type=str, default='greedy', choices=['greedy', 'beam'])
 
 eval_args = parser.parse_args()
@@ -42,7 +58,8 @@ with open(os.path.join(eval_args.name, 'vars.json'), 'r') as f:
     params = json.load(f)
 print('Checkpoint at epoch %d ' % checkpoint['epoch'])
 args = Struct(**params)
-
+window_size = eval_args.window_size
+window_stride = 0.01
 sd.default.samplerate = 16000
 duration = 60  # seconds
 
@@ -57,11 +74,14 @@ model = Transducer(args.audio_feat, _tokenizer.vocab_size,
         args.h_dim, # hidden dim
         args.layers, pred_num_layers=args.pred_layers, dropout=args.dropout).cpu()
 
-transforms = torch.nn.Sequential(MFCC_(
-        sample_rate=16000, log_mels=True,
-        n_mfcc= args.audio_feat//3,  normalize=False,
-        melkwargs={'n_fft': args.n_fft, 'f_max': 5800, 'f_min': 20 }
-    ), ConcatFeature(merge_size=3))
+if args.audio_feat > 80:
+    args.audio_feat = args.audio_feat// 3
+
+transforms = torch.nn.Sequential(AudioPreprocessing(
+                normalize='none', sample_rate=16000, window_size=window_size, 
+                window_stride=window_stride, features=args.audio_feat, n_fft=512, log=True,
+                feat_type='logfbank', trim_silence=True, window='hann',dither=0.00001, frame_splicing=1, transpose_out=False
+            ), ConcatFeature(merge_size=3))
 
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
@@ -156,12 +176,13 @@ def test_wav(wav_file):
         sr = 16000
     data_ = data[0]
     print(sr)
-    transforms = torch.nn.Sequential(MFCC_(
-        sample_rate=sr, log_mels=True,
-        n_mfcc= args.audio_feat//3,  normalize=False,
-        melkwargs={'n_fft': args.n_fft, 'f_max': 5800, 'f_min': 20 }
-    ), ConcatFeature(merge_size=3))
+    transforms = torch.nn.Sequential(AudioPreprocessing(
+                normalize='none', sample_rate=16000, window_size=window_size, 
+                window_stride=window_stride, features=args.audio_feat, n_fft=512, log=True,
+                feat_type='logfbank', trim_silence=True, window='hann',dither=0.00001, frame_splicing=1, transpose_out=False
+            ), ConcatFeature(merge_size=3))
     output = transforms(data_).T#[ -1:, :]
+    print(output.shape)
     y, nll = model.greedy_decode(output.unsqueeze(0),torch.from_numpy(np.array([len(output)])).int())
     hypothesis = _tokenizer.decode_plus(y)
     print(hypothesis)
@@ -174,22 +195,22 @@ def stream_wav(wav_file):
         resample = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
         data = resample(data)
         sr = 16000
-    transforms = torch.nn.Sequential(MFCC_(
-        sample_rate=sr, log_mels=True,
-        n_mfcc= args.audio_feat // 3,  normalize=False,
-        melkwargs={'n_fft': args.n_fft, 'f_max': 5800, 'f_min': 20 }
-    ), ConcatFeature(merge_size=3))
+    transforms = torch.nn.Sequential(AudioPreprocessing(
+                normalize='none', sample_rate=16000, window_size=window_size, 
+                window_stride=window_stride, features=args.audio_feat, n_fft=512, log=True,
+                feat_type='logfbank', trim_silence=True, window='hann',dither=0.00001, frame_splicing=1, transpose_out=False
+            ), ConcatFeature(merge_size=3))
     full_output = transforms(data.flatten()).T.squeeze(-1)
 
     # mfcc_cmvn = cmvnw(full_output.numpy(), win_size=frames*3, variance_normalization=False)
     # full_output = torch.from_numpy(mfcc_cmvn)
     # print(torch.mean(full_output), torch.var(full_output))
     # full_output = (full_output-torch.mean(full_output))/torch.var(full_output) 
-    print(torch.mean(full_output), torch.var(full_output))
+    print('full_output mean and vars: ',torch.mean(full_output), torch.var(full_output))
     
-    print(full_output.shape)
+    print('full_output ', full_output.shape)
     true_h_enc, _ = model.encoder(full_output.unsqueeze(0))
-    print(true_h_enc.shape)
+    print('true_h_enc ', true_h_enc.shape)
 
     data = data.T.numpy()
     # for audio_data in chunks(data, 599*frames + (frames-1)):
@@ -197,7 +218,8 @@ def stream_wav(wav_file):
     h_enc = []
     encoder_h = None
     mfcc = []
-    for audio_data in chunks(data, 599*frames + (frames-1)):
+    buffer_size = int(16*1000 * window_size * 3 - 1)
+    for audio_data in chunks(data, buffer_size*frames + (frames-1)):
         # print(len(audio_data.flatten()))
         output = transforms(torch.from_numpy(audio_data.flatten()).float()).T#[ -1:, :]
         # output = (output-torch.mean(output))/torch.var(output)
@@ -209,7 +231,7 @@ def stream_wav(wav_file):
         h_enc.append(h_enc_[:, :, :])
 
     # print(h_enc[0].shape)
-    # print(torch.cat(mfcc).shape)
+    print('segmented logfbank ',torch.cat(mfcc).shape)
     mfcc= torch.cat(mfcc)
     h_enc_2, encoder_h = model.encoder(mfcc.unsqueeze(0))
     print('chunk mfcc mean, var')

@@ -261,8 +261,7 @@ class StackedRecurrent(nn.Sequential):
             elif isinstance(module, nn.LayerNorm):
                 inputs = module(inputs)
                 continue
-            elif isinstance(module, nn.LSTM):
-                module.flatten_parameters()
+
             output, h = module(inputs, hidden[hidden_idx])
             hidden_idx += 1
             next_hidden.append(h)

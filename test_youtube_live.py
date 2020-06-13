@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import subprocess
 import av
 import numpy as np
-from stream import transforms, model, _tokenizer, test_wav
+from stream import transforms, model, _tokenizer, test_wav, window_size
 import torchaudio
 import torch
 import torch.nn.functional as F
@@ -12,8 +12,9 @@ resample = torchaudio.transforms.Resample(
     orig_freq=44*1000, new_freq=16*1000
 )
 
-frames = 6
-buffer_size = 599*frames+ (frames-1)
+frames = 4
+single_input_chunk = int(16*1000 * window_size * 3 - 1)
+buffer_size = single_input_chunk*frames+ (frames-1)
 resampler = av.AudioResampler("s16p",rate=16*1000, layout=1)
 buffers = []
 
@@ -66,6 +67,9 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
     input_container = av.open(videolink)
     input_stream = input_container.streams.get(audio=0)[0]
 
+    '''
+    Start of decoding loop
+    '''
 
     for frame in input_container.decode(input_stream):
         frame.pts = None
@@ -83,9 +87,12 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
             buffers = waveform
         elif len(buffers) < buffer_size:
             buffers = torch.cat([ buffers, waveform ], dim=0)
-        # print(len(buffers))
 
-        if len(buffers) > buffer_size:
+        # print(len(buffers), len(waveform))
+
+        if len(buffers) >= buffer_size:
+            # print('pop buffers')
+
             output_wave = buffers[:buffer_size]
             buffers = buffers[buffer_size:]
             # print(output.shape)
@@ -93,14 +100,16 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
             if torch.isnan(output_wave).any():
                 print("X",flush=True, end=" ")
                 continue
-
+            # print('trans')
             output = transforms(output_wave).T#[ -1:, :]
+            # print(output[:2, :5], output.shape)
 
             if torch.isnan(output).any():
                 print("X",flush=True, end=" ")
                 continue
 
             h_enc, encoder_h = model.encoder(output.unsqueeze(0), hid=encoder_h)
+            # print('decode')
             for i in range(h_enc.shape[1]):
                 logits = model.joint(h_enc[:, i], h_pre[:, 0])
                 probs = F.log_softmax(logits, dim=1)
@@ -122,7 +131,7 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
                     h_pre[not_blank, ...] = new_h_pre[not_blank, ...]
                     h[:, not_blank, :] = new_h[:, not_blank, :]
                     c[:, not_blank, :] = new_c[:, not_blank, :]    
-        
+            # print('finish decode')
             track_cnt += 1
             if (track_cnt+1) % 200 == 0:
                 print('[reset state]')
@@ -137,6 +146,10 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
             print('exit')
             break
  
+    '''
+    End of decoding loop
+    '''
+
     if output_stream:
         for packet in output_stream.encode(None):
             output_container.mux(packet)
