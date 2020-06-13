@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import logging
 
-av.logging.set_level(30)
+av.logging.set_level(0)
 
 frames = 4
 single_input_chunk = int(16*1000 * window_size * 3 - 1)
