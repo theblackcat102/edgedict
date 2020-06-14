@@ -12,9 +12,10 @@ from rnnt.tokenizer import HuggingFaceTokenizer
 from rnnt.dataset import MergedDataset, Librispeech
 from rnnt.stream import OpenVINOStreamDecoder, PytorchStreamDecoder
 
-
+# PytorchStreamDecoder
 flags.DEFINE_string('model_name', "last.pt", help='steps of checkpoint')
-flags.DEFINE_integer('step_n_frxame', 10, help='input frame(stacked)')
+flags.DEFINE_integer('step_n_frame', 2, help='input frame(stacked)')
+
 flags.DEFINE_integer('samples', 10, help='test samples')
 
 
@@ -53,40 +54,38 @@ def main(argv):
         cache_dir=os.path.join('logs', FLAGS.name), vocab_size=FLAGS.bpe_size)
 
     dataloader = DataLoader(
-        dataset=Subset(
-            MergedDataset([
-                Librispeech(
-                    root=FLAGS.LibriSpeech_test,
-                    tokenizer=tokenizer,
-                    transform=None,
-                    reverse_sorted_by_length=True)]),
-            indices=np.arange(FLAGS.samples)),
+        dataset=MergedDataset([
+            Librispeech(
+                root=FLAGS.LibriSpeech_test,
+                tokenizer=tokenizer,
+                transform=None,
+                reverse_sorted_by_length=True)]),
         batch_size=1, shuffle=False, num_workers=0)
 
     pytorch_decoder = PytorchStreamDecoder(FLAGS)
-    pytorch_decoder.reset_profile()
-    wers = []
-    total_time = 0
-    total_frame = 0
-    with tqdm(dataloader, dynamic_ncols=True) as pbar:
-        pbar.set_description("Pytorch full sequence decode")
-        for waveform, tokens in pbar:
-            true_seq = tokenizer.decode(tokens[0].numpy())
-            # pytorch: Encode waveform at a time
-            start = time.time()
-            pred_seq, frames = fullseq_decode(pytorch_decoder, waveform)
-            # pbar.write(true_seq)
-            # pbar.write(pred_seq)
-            elapsed = time.time() - start
-            total_time += elapsed
-            total_frame += frames
-            wer = jiwer.wer(true_seq, pred_seq)
-            wers.append(wer)
-            pbar.set_postfix(wer='%.3f' % wer, elapsed='%.3f' % elapsed)
-    wer = np.mean(wers)
-    print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
-        wer, total_frame, total_time, total_frame / total_time,
-        total_frame / total_time / 16000))
+    # pytorch_decoder.reset_profile()
+    # wers = []
+    # total_time = 0
+    # total_frame = 0
+    # with tqdm(dataloader, dynamic_ncols=True) as pbar:
+    #     pbar.set_description("Pytorch full sequence decode")
+    #     for waveform, tokens in pbar:
+    #         true_seq = tokenizer.decode(tokens[0].numpy())
+    #         # pytorch: Encode waveform at a time
+    #         start = time.time()
+    #         pred_seq, frames = fullseq_decode(pytorch_decoder, waveform)
+    #         # pbar.write(true_seq)
+    #         # pbar.write(pred_seq)
+    #         elapsed = time.time() - start
+    #         total_time += elapsed
+    #         total_frame += frames
+    #         wer = jiwer.wer(true_seq, pred_seq)
+    #         wers.append(wer)
+    #         pbar.set_postfix(wer='%.3f' % wer, elapsed='%.3f' % elapsed)
+    # wer = np.mean(wers)
+    # print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
+    #     wer, total_frame, total_time, total_frame / total_time,
+    #     total_frame / total_time / 16000))
 
     pytorch_decoder.reset_profile()
     wers = []
@@ -109,12 +108,12 @@ def main(argv):
     print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
         wer, total_frame, total_time, total_frame / total_time,
         total_frame / total_time / 16000))
-    print("Mean encoding time: %.3f" % np.mean(
-        pytorch_decoder.encoder_elapsed))
-    print("Mean decoding time: %.3f" % np.mean(
-        pytorch_decoder.decoder_elapsed))
-    print("Mean joint time: %.3f" % np.mean(
-        pytorch_decoder.joint_elapsed))
+    print("Mean encoding time: %.3f ms" % (1000 * np.mean(
+        pytorch_decoder.encoder_elapsed)))
+    print("Mean decoding time: %.3f ms" % (1000 * np.mean(
+        pytorch_decoder.decoder_elapsed)))
+    print("Mean joint time: %.3f ms" % (1000 * np.mean(
+        pytorch_decoder.joint_elapsed)))
 
     openvino_decoder = OpenVINOStreamDecoder(FLAGS)
     openvino_decoder.reset_profile()
@@ -140,12 +139,12 @@ def main(argv):
     print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
         wer, total_frame, total_time, total_frame / total_time,
         total_frame / total_time / 16000))
-    print("Mean encoding time: %.3f" % np.mean(
-        openvino_decoder.encoder_elapsed))
-    print("Mean decoding time: %.3f" % np.mean(
-        openvino_decoder.decoder_elapsed))
-    print("Mean joint time: %.3f" % np.mean(
-        openvino_decoder.joint_elapsed))
+    print("Mean encoding time: %.3f ms" % (1000 * np.mean(
+        openvino_decoder.encoder_elapsed)))
+    print("Mean decoding time: %.3f ms" % (1000 * np.mean(
+        openvino_decoder.decoder_elapsed)))
+    print("Mean joint time: %.3f ms" % (1000 * np.mean(
+        openvino_decoder.joint_elapsed)))
 
 
 if __name__ == '__main__':

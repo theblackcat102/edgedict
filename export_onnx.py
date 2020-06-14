@@ -12,7 +12,7 @@ from rnnt.models import Transducer
 
 
 flags.DEFINE_string('model_name', "last.pt", help='checkpoint name')
-flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
+flags.DEFINE_integer('step_n_frame', 2, help='input frame(stacked)')
 
 
 def export_encoder(transducer, input_size, vocab_size, logdir):
