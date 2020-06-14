@@ -1,3 +1,5 @@
+import time
+
 import os
 import numpy as np
 import torch
@@ -9,6 +11,11 @@ from rnnt.tokenizer import HuggingFaceTokenizer, BOS, NUL
 
 
 class StreamTransducerDecoder:
+    def reset_profile(self):
+        self.encoder_elapsed = []
+        self.decoder_elapsed = []
+        self.joint_elapsed = []
+
     def reset(self):
         raise NotImplementedError()
 
@@ -54,6 +61,7 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
         self.decoder = transducer.decoder
         self.joint = transducer.joint
 
+        self.reset_profile()
         self.reset()
 
     @torch.no_grad()
@@ -73,18 +81,25 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
 
     @torch.no_grad()
     def decode(self, frame):
+        start = time.time()
         xs = self.transform(frame).transpose(1, 2)
         enc_xs, (self.enc_h, self.enc_c) = self.encoder(
             xs, (self.enc_h, self.enc_c))
+        self.encoder_elapsed.append(time.time() - start)
+
         tokens = []
         for k in range(enc_xs.shape[1]):
+            start = time.time()
             prob = self.joint(enc_xs[:, k], self.dec_x[:, 0])
             pred = prob.argmax(dim=-1).item()
+            self.joint_elapsed.append(time.time() - start)
 
             if pred != NUL:
                 dec_x = torch.ones(1, 1).long() * pred
+                start = time.time()
                 self.dec_x, (self.dec_h, self.dec_c) = self.decoder(
                     dec_x, (self.dec_h, self.dec_c))
+                self.decoder_elapsed.append(time.time() - start)
                 seq = self.tokenizer.tokenizer.id_to_token(pred)
                 seq = seq.replace('</w>', ' ')
                 tokens.append(seq)
@@ -123,6 +138,7 @@ class OpenVINOStreamDecoder(StreamTransducerDecoder):
             weights=os.path.join(logdir, 'joint.bin'))
         self.joint = ie.load_network(network=joint_net, device_name='CPU')
 
+        self.reset_profile()
         self.reset()
 
     def reset(self):
@@ -151,29 +167,32 @@ class OpenVINOStreamDecoder(StreamTransducerDecoder):
         self.dec_c = outputs['Concat_24']
 
     def decode(self, frame):
+        start = time.time()
         xs = self.transform(frame).transpose(1, 2).numpy()
         outputs = self.encoder.infer(inputs={
             'input': xs,
             'input_hidden': self.enc_h,
             'input_cell': self.enc_c,
         })
-        # print(outputs.keys())
         enc_xs = outputs['Add_156']
         self.enc_h = outputs['Concat_153']
         self.enc_c = outputs['Concat_154']
+        self.encoder_elapsed.append(time.time() - start)
 
         tokens = []
         for k in range(enc_xs.shape[1]):
+            start = time.time()
             outputs = self.joint.infer({
                 'input_h_enc': enc_xs[:, k],
                 'input_h_dec': self.dec_x[:, 0]
             })
-            # print(outputs.keys())
             prob = outputs['Gemm_3']
             pred = prob.argmax(axis=-1).item()
+            self.joint_elapsed.append(time.time() - start)
 
             if pred != NUL:
                 dec_x = np.ones((1, 1), dtype=np.long) * pred
+                start = time.time()
                 outputs = self.decoder.infer({
                     'input': dec_x,
                     'input_hidden': self.dec_h,
@@ -183,6 +202,7 @@ class OpenVINOStreamDecoder(StreamTransducerDecoder):
                 self.dec_x = outputs['Add_26']
                 self.dec_h = outputs['Concat_23']
                 self.dec_c = outputs['Concat_24']
+                self.decoder_elapsed.append(time.time() - start)
                 seq = self.tokenizer.tokenizer.id_to_token(pred)
                 seq = seq.replace('</w>', ' ')
                 tokens.append(seq)

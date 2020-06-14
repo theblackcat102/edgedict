@@ -149,5 +149,4 @@ class FilterbankFeatures(nn.Module):
             #            if pad_amt != 0:
             x = nn.functional.pad(x, (0, self.pad_to - pad_amt))
 
-        assert not torch.isnan(x).any()
-        return x  # .to(dtype)
+        return x

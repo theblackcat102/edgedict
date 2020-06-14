@@ -15,6 +15,7 @@ from rnnt.stream import OpenVINOStreamDecoder, PytorchStreamDecoder
 
 flags.DEFINE_integer('step', 45000, help='steps of checkpoint')
 flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
+flags.DEFINE_integer('samples', 10, help='test samples')
 
 
 def fullseq_decode(fullseq_decoder, waveform, verbose=0):
@@ -59,10 +60,11 @@ def main(argv):
                     tokenizer=tokenizer,
                     transform=None,
                     reverse_sorted_by_length=True)]),
-            indices=np.arange(1000)),
+            indices=np.arange(FLAGS.samples)),
         batch_size=1, shuffle=False, num_workers=0)
 
     pytorch_decoder = PytorchStreamDecoder(FLAGS)
+    pytorch_decoder.reset_profile()
     wers = []
     total_time = 0
     total_frame = 0
@@ -86,6 +88,7 @@ def main(argv):
         wer, total_frame, total_time, total_frame / total_time,
         total_frame / total_time / 16000))
 
+    pytorch_decoder.reset_profile()
     wers = []
     total_time = 0
     total_frame = 0
@@ -106,8 +109,15 @@ def main(argv):
     print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
         wer, total_frame, total_time, total_frame / total_time,
         total_frame / total_time / 16000))
+    print("Mean encoding time: %.3f" % np.mean(
+        pytorch_decoder.encoder_elapsed))
+    print("Mean decoding time: %.3f" % np.mean(
+        pytorch_decoder.decoder_elapsed))
+    print("Mean joint time: %.3f" % np.mean(
+        pytorch_decoder.joint_elapsed))
 
     openvino_decoder = OpenVINOStreamDecoder(FLAGS)
+    openvino_decoder.reset_profile()
     wers = []
     total_time = 0
     total_frame = 0
@@ -130,6 +140,12 @@ def main(argv):
     print('Mean wer: %.3f, Frame: %d, Time: %.3f, FPS: %.3f, speed: %.3f' % (
         wer, total_frame, total_time, total_frame / total_time,
         total_frame / total_time / 16000))
+    print("Mean encoding time: %.3f" % np.mean(
+        openvino_decoder.encoder_elapsed))
+    print("Mean decoding time: %.3f" % np.mean(
+        openvino_decoder.decoder_elapsed))
+    print("Mean joint time: %.3f" % np.mean(
+        openvino_decoder.joint_elapsed))
 
 
 if __name__ == '__main__':
