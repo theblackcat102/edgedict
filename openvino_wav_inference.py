@@ -1,23 +1,19 @@
 import os
 import time
 
-import torch.onnx
 import numpy as np
 import jiwer
 from absl import app, flags
-from openvino.inference_engine import IECore
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from rnnt.args import FLAGS                             # define training FLAGS
-from rnnt.transforms import build_transform
-from rnnt.tokenizer import HuggingFaceTokenizer, BOS, NUL
-from rnnt.models import Transducer
+from rnnt.tokenizer import HuggingFaceTokenizer
 from rnnt.dataset import MergedDataset, Librispeech
 from rnnt.stream import OpenVINOStreamDecoder, PytorchStreamDecoder
 
 
-flags.DEFINE_integer('step', 105000, help='steps of checkpoint')
+flags.DEFINE_string('model_name', "last.pt", help='steps of checkpoint')
 flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
 
 

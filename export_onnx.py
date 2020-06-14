@@ -11,9 +11,8 @@ from rnnt.tokenizer import HuggingFaceTokenizer
 from rnnt.models import Transducer
 
 
-flags.DEFINE_integer('step', None, help='steps of checkpoint')
+flags.DEFINE_string('model_name', "last.pt", help='checkpoint name')
 flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
-flags.mark_flags_as_required(['step'])
 
 
 def export_encoder(transducer, input_size, vocab_size, logdir):
@@ -195,7 +194,7 @@ def main(argv):
         F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask
     )
 
-    model_path = os.path.join(logdir, 'models', '%d.pt' % FLAGS.step)
+    model_path = os.path.join(logdir, 'models', FLAGS.model_name)
     checkpoint = torch.load(model_path, lambda storage, loc: storage)
     transducer = Transducer(
         vocab_embed_size=FLAGS.vocab_embed_size,
