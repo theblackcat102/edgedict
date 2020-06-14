@@ -17,7 +17,10 @@ from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
 
 
-device = torch.device('cuda:0')
+if torch.cuda.is_available():
+    device = torch.device('cuda:0')
+else:
+    device = torch.device('cpu')
 
 
 def infloop(dataloader):

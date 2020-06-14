@@ -13,8 +13,8 @@ from rnnt.dataset import MergedDataset, Librispeech
 from rnnt.stream import OpenVINOStreamDecoder, PytorchStreamDecoder
 
 
-flags.DEFINE_integer('step', 45000, help='steps of checkpoint')
-flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
+flags.DEFINE_string('model_name', "last.pt", help='steps of checkpoint')
+flags.DEFINE_integer('step_n_frxame', 10, help='input frame(stacked)')
 flags.DEFINE_integer('samples', 10, help='test samples')
 
 

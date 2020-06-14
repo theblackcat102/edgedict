@@ -9,9 +9,10 @@ from rnnt.args import FLAGS
 from rnnt.stream import PytorchStreamDecoder, OpenVINOStreamDecoder
 av.logging.set_level(av.logging.ERROR)
 
-
-flags.DEFINE_integer('step', 105000, help='steps of checkpoint')
+# PytorchStreamDecoder
+flags.DEFINE_string('model_name', "last.pt", help='steps of checkpoint')
 flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
+
 flags.DEFINE_enum('stream_decoder', 'openvino', ['torch', 'openvino'],
                   help='stream decoder implementation')
 flags.DEFINE_string('url', 'https://www.youtube.com/watch?v=2EppLNonncc',

@@ -39,7 +39,7 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
             T_mask=FLAGS.T_mask, T_num_mask=FLAGS.T_num_mask,
             F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask)
 
-        model_path = os.path.join(logdir, 'models', '%d.pt' % FLAGS.step)
+        model_path = os.path.join(logdir, 'models', FLAGS.model_name)
         checkpoint = torch.load(model_path, lambda storage, loc: storage)
         transducer = Transducer(
             vocab_embed_size=FLAGS.vocab_embed_size,
