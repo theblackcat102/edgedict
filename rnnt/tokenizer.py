@@ -43,6 +43,7 @@ class CharTokenizer:
         for token, idx in self.token2id.items():
             self.id2token[idx] = token
         self.vocab_size = len(self.token2id)
+        os.makedirs(self.cache_dir)
         pickle.dump(self.token2id,
                     open(os.path.join(self.cache_dir, "token2id.pkl"), "wb"))
 
@@ -110,8 +111,7 @@ class HuggingFaceTokenizer:
 
     def decode(self, tokens, skip_special_tokens=True):
         text = self.tokenizer.decode(                   # My special tokens
-            tokens,
-            # [token for token in tokens if token > 3],   # aren't skipped
+            [token for token in tokens if token > 3],   # aren't skipped
             skip_special_tokens=skip_special_tokens,    # even I set fucking
         )                                               # skip_special_tokens
         return text                                     # to True
