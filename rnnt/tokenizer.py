@@ -43,6 +43,7 @@ class CharTokenizer:
         for token, idx in self.token2id.items():
             self.id2token[idx] = token
         self.vocab_size = len(self.token2id)
+        os.makedirs(self.cache_dir)
         pickle.dump(self.token2id,
                     open(os.path.join(self.cache_dir, "token2id.pkl"), "wb"))
 
