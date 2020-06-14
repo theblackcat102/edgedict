@@ -222,20 +222,62 @@ class Sequence():
             self.logp = seq.logp
 
 
+class LMModel(nn.Module):
+    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5, tie_weights=False):
+        super(LMModel, self).__init__()
+        self.ntoken = ntoken
+        self.drop = nn.Dropout(dropout)
+        self.encoder = nn.Embedding(ntoken, ninp)
+        self.rnn = nn.LSTM(ninp, nhid, nlayers, dropout=dropout, batch_first=True)
+        self.decoder = nn.Linear(nhid, ntoken)
+        if tie_weights:
+            if nhid != ninp:
+                raise ValueError('When using the tied flag, nhid must be equal to emsize')
+            self.decoder.weight = self.encoder.weight
+        self.init_weights()
+        self.nhid = nhid
+        self.rnn_type = 'LSTM'
+        self.nlayers = nlayers
+
+    def init_weights(self):
+        initrange = 0.1
+        nn.init.uniform_(self.encoder.weight, -initrange, initrange)
+        nn.init.zeros_(self.decoder.weight)
+        nn.init.uniform_(self.decoder.weight, -initrange, initrange)
+    
+    def forward(self, input, hidden):
+        emb = self.drop(self.encoder(input))
+        output, hidden = self.rnn(emb, hidden)
+        output = self.drop(output)
+        decoded = self.decoder(output)
+        decoded = decoded.view(-1, self.ntoken)
+        return F.log_softmax(decoded, dim=-1), hidden
+
+    def init_hidden(self, bsz):
+        weight = next(self.parameters())
+        if self.rnn_type == 'LSTM':
+            return (weight.new_zeros(self.nlayers, bsz, self.nhid),
+                    weight.new_zeros(self.nlayers, bsz, self.nhid))
+        else:
+            return weight.new_zeros(self.nlayers, bsz, self.nhid)
+
 if __name__ == "__main__":
     import torch
     from torch.autograd import Variable
     import numpy as np
 
-    model = Transducer(128,3600,8 ,64, 4).cuda()
-    x = torch.randn((32, 128, 128)).float().cuda()
-    y = torch.randint(0, 3500, (32, 10)).long().cuda()
-    xlen = torch.from_numpy(np.array([128]*32)).int()
-    ylen = torch.from_numpy(np.array([10]*32)).int()
+    # model = Transducer(128,3600,8 ,64, 4).cuda()
+    # x = torch.randn((32, 128, 128)).float().cuda()
+    # y = torch.randint(0, 3500, (32, 10)).long().cuda()
+    # xlen = torch.from_numpy(np.array([128]*32)).int()
+    # ylen = torch.from_numpy(np.array([10]*32)).int()
 
     # x = pad_sequence(x, batch_first=True)
     # x = pack_padded_sequence(x, lengths=xlen, batch_first=True)
 
-    loss = model(x, y, xlen, ylen)
+    # loss = model(x, y, xlen, ylen)
     # loss.backward()
     # print(loss)
+    model = LMModel(1024, 64, 256, 3, dropout=0.2, tie_weights=False)
+    checkpoint = torch.load('lm_model.pt',map_location=torch.device('cpu'))
+    model.load_state_dict(checkpoint)

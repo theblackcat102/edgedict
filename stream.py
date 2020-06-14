@@ -48,6 +48,16 @@ class Struct:
         self.__dict__.update(entries)
 
 
+from models import LMModel
+
+lm_model = LMModel(1024, 64, 1024, 2, tie_weights=False)
+checkpoint = torch.load('lm_model.pt',map_location=torch.device('cpu'))
+lm_model.load_state_dict(checkpoint)
+lm_model.eval()
+
+lm_hidden = lm_model.init_hidden(1)
+
+
 
 best_checkpoint = os.path.join(eval_args.name, 'amp_checkpoint.pt')
 if not os.path.exists(best_checkpoint):
@@ -260,11 +270,26 @@ def decode(h_enc):
     log_p = []
     bos = torch.ones(1, 1).long() * 1
     h_pre, (h, c) = model.decoder(model.embed(bos))
+    start = True
+    prev_logits = None
+    lm_probs = None
+    hidden_ = lm_model.init_hidden(1)
+    lm_logist, lm_hidden = lm_model(torch.ones(1).long().unsqueeze(0), hidden_ )
+
     for i in range(h_enc.shape[1]):
         # joint
         logits = model.joint(h_enc[:, i], h_pre[:, 0])
         probs = F.log_softmax(logits, dim=1)
+
         prob, pred = torch.max(probs, dim=1)
+        not_blank = pred.item() != model.blank
+        if not_blank:
+
+            probs = lm_logist*0.3 + probs
+            prob, pred = torch.max(probs, dim=1)
+            lm_logist, lm_hidden = lm_model(pred.unsqueeze(1), lm_hidden )
+
+
         y_seq.append(pred)
         log_p.append(prob)
         embed_pred = model.embed(pred.unsqueeze(1))

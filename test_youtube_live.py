@@ -3,11 +3,15 @@ from datetime import datetime, timedelta
 import subprocess
 import av
 import numpy as np
-from stream import transforms, model, _tokenizer, test_wav, window_size, eval_args
+from stream import transforms, model, _tokenizer, test_wav, window_size, eval_args, lm_model
 import torchaudio
 import torch
 import torch.nn.functional as F
 import logging
+
+
+hidden_ = lm_model.init_hidden(1)
+lm_logist, lm_hidden = lm_model(torch.ones(1).long().unsqueeze(0), hidden_ )
 
 av.logging.set_level(0)
 
@@ -47,6 +51,7 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
     global encoder_h
     global h, c
     global h_pre
+    global lm_hidden, lm_logist
 
     if output_stream:
         output_container = av.open(filepath, 'w')
@@ -116,6 +121,10 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
 
                 not_blank = pred.item() != model.blank
                 if not_blank:
+                    probs = lm_logist*0.1 + probs
+                    prob, pred = torch.max(probs, dim=1)
+
+                    lm_logist, lm_hidden = lm_model(pred.unsqueeze(1), lm_hidden )
                     track_cnt -= 1
                     y_seq.append(_tokenizer.token.id_to_token(pred.item()))
                     if len(y_seq) > 0 and '</w>' in y_seq[-1]:
@@ -131,11 +140,11 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
                     h[:, not_blank, :] = new_h[:, not_blank, :]
                     c[:, not_blank, :] = new_c[:, not_blank, :]    
             # print('finish decode')
-            track_cnt += 1
-            if (track_cnt+1) % 200 == 0:
-                print('[reset state]')
-                reset_hidden_state()
-                track_cnt = 0
+            # track_cnt += 1
+            # if (track_cnt+1) % 200 == 0:
+            #     print('[reset state]')
+            #     reset_hidden_state()
+            #     track_cnt = 0
 
         if output_stream:
             for packet in output_stream.encode(resample_frame):
