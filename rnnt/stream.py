@@ -56,6 +56,7 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
 
         self.reset()
 
+    @torch.no_grad()
     def reset(self):
         self.enc_h = torch.zeros(
             self.FLAGS.enc_layers, 1, self.FLAGS.enc_hidden_size)
@@ -70,6 +71,7 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
         self.dec_x, (self.dec_h, self.dec_c) = self.decoder(
             dec_x, (dec_h, dec_c))
 
+    @torch.no_grad()
     def decode(self, frame):
         xs = self.transform(frame).transpose(1, 2)
         enc_xs, (self.enc_h, self.enc_c) = self.encoder(

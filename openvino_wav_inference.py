@@ -1,23 +1,19 @@
 import os
 import time
 
-import torch.onnx
 import numpy as np
 import jiwer
 from absl import app, flags
-from openvino.inference_engine import IECore
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from rnnt.args import FLAGS                             # define training FLAGS
-from rnnt.transforms import build_transform
-from rnnt.tokenizer import HuggingFaceTokenizer, BOS, NUL
-from rnnt.models import Transducer
+from rnnt.tokenizer import HuggingFaceTokenizer
 from rnnt.dataset import MergedDataset, Librispeech
 from rnnt.stream import OpenVINOStreamDecoder, PytorchStreamDecoder
 
 
-flags.DEFINE_integer('step', 105000, help='steps of checkpoint')
+flags.DEFINE_integer('step', 45000, help='steps of checkpoint')
 flags.DEFINE_integer('step_n_frame', 10, help='input frame(stacked)')
 
 
@@ -62,8 +58,8 @@ def main(argv):
                     root=FLAGS.LibriSpeech_test,
                     tokenizer=tokenizer,
                     transform=None,
-                    reverse_sorted_by_length=False)]),
-            indices=np.arange(10)),
+                    reverse_sorted_by_length=True)]),
+            indices=np.arange(1000)),
         batch_size=1, shuffle=False, num_workers=0)
 
     pytorch_decoder = PytorchStreamDecoder(FLAGS)

@@ -270,21 +270,21 @@ if __name__ == "__main__":
                 tokenizer=tokenizer,
                 transform=transform_train,
                 audio_max_length=16),
-            # TEDLIUM(
-            #     root="./data/TEDLIUM_release-3/data",
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14),
+            TEDLIUM(
+                root="./datasets/TEDLIUM_release-3/data",
+                tokenizer=tokenizer,
+                transform=transform_train,
+                audio_max_length=16),
             # TEDLIUM(
             #     root="./data/TEDLIUM_release1/train",
             #     tokenizer=tokenizer,
-            #     transforms=transform,
+            #     transform=transform_train,
             #     audio_max_length=14),
-            # CommonVoice(
-            #     root='./data/common_voice', labels='train.tsv',
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14)
+            CommonVoice(
+                root='./datasets/common_voice', labels='train.tsv',
+                tokenizer=tokenizer,
+                transform=transform_train,
+                audio_max_length=16)
         ]),
         batch_size=128, shuffle=True, num_workers=32,
         collate_fn=seq_collate, drop_last=True)
@@ -319,12 +319,12 @@ if __name__ == "__main__":
         batch_size=128, shuffle=False, num_workers=32,
         collate_fn=seq_collate)
 
-    tokenizer.build(train_dataloader.dataset.texts())
-    print("==========================")
-    for xs, ys, xlen, ylen in tqdm(train_dataloader):
-        pass
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    # tokenizer.build(train_dataloader.dataset.texts())
+    # print("==========================")
+    # for xs, ys, xlen, ylen in tqdm(train_dataloader):
+    #     pass
+    #     # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
-    for xs, ys, xlen, ylen in tqdm(val_dataloader):
-        pass
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    # for xs, ys, xlen, ylen in tqdm(val_dataloader):
+    #     pass
+    #     # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
