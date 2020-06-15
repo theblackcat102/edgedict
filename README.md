@@ -1,9 +1,15 @@
 # Online Speech recognition using RNN-Transducer
 
-Online speech recognition on Youtube Live video with ( 4 ~ 10 seconds faster than Youtube's caption )
+Speech to text using RNN Transducer (Graves et al 2013 ) trained on 2000+ hours of audio speech data.
 
-![demo online decoding]()
+Using this model we can run online speech recognition on Youtube Live video with ( 4 ~ 10 seconds faster than Youtube's caption ) on an 2.3GHz dual-core Intel Core i5 processor.
 
+![demo online decoding](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/demo-short.gif)
+
+
+Visualize alignment of audio and text
+
+![visualize alignment](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/visualize.png)
 
 ## Install:
 
@@ -153,3 +159,11 @@ pip install git+https://github.com/mcfletch/sphfile.git
 - [x] Write checkpointing and tensorboardX logger
 
 - [x] Modify wraprnnt-pytorch to compatible with apex mixed precision
+
+## Reference
+
+* [Sequence Transduction with Recurrent Neural Networks](https://arxiv.org/abs/1211.3711)
+
+* [SPEECH RECOGNITION WITH DEEP RECURRENT NEURAL NETWORKS](https://arxiv.org/pdf/1303.5778.pdf)
+
+* [Awni implementation of transducer](https://github.com/awni/transducer)
