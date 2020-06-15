@@ -2,14 +2,82 @@
 
 Speech to text using RNN Transducer (Graves et al 2013 ) trained on 2000+ hours of audio speech data.
 
+This work is a joint collaboration with @w86763777
+
+## Highlights
+
+* First repo demonstrating online decoding capability of RNN Transducer (RNN-T)
+
+* Port RNN-T model to ONNX and OpenVINO
+
+* A large scale training on diverse voice datasets for RNN-T with apex and data parallel 
+
 Using this model we can run online speech recognition on Youtube Live video with ( 4 ~ 10 seconds faster than Youtube's caption ) on an 2.3GHz dual-core Intel Core i5 processor.
 
 ![demo online decoding](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/demo-short.gif)
 
 
-Visualize alignment of audio and text
+Visualize alignment of audio and text, similar to paper in Graves et al 2013.
 
 ![visualize alignment](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/visualize.png)
+
+
+## Training Tips
+
+Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by historical data. Our current best model only achive a WER of 16.3% on Librispeech test-clean, which has still a long way to reach the common baseline of around 5%.
+
+But we still learn some tricks and would like to share with you.
+
+1. Balanced encoder and predictor is important 
+
+A good balance between audio encoding and language decoding is important since audio features is much more complicated than text ( in terms of diversity and feature space ). Hence a good rule of thumb is encoder should at least 4 times the capacity of the predictor network.
+
+![a balance ratio between encoder and predictor](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/model_balance.png)
+
+
+2. Vocabulary size improve convergence
+
+Contradict to the article mentioned above, we found that larger vocabulary size ( we use BPE as wordpiece vocabulary ) always result in better performance. This is interesting, because CNN based CTC model usually suffers from performance drop when the vocabulary size increase til an extend. 
+
+![Vocab size](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/vocab_ablation.png)
+
+
+3. Some other tips
+
+Big batch size is better as mentioned in all previous RNN-T papers
+
+Train your model as large as possible ( 100M parameters is better )
+
+Time reduction in first and middle layers help to reduce training memory usage  but suffers certain performance hit that we haven't had the resource and time to investigate. We however, think this can be make up by designing much more efficient model architecture. 
+
+Layer norm helps model handle sudden increase of voice pitch during online decoding, however this slows down the convergence speed.
+
+Training RNN-T is slow, and any brave warrior who wants to challenge should be patient and expect to own a good compute resource ( ie many GPUs, 1TB of SSD storage ).
+
+## Other results
+
+1. Performance comparsion between Pytorch, ONNX, OpenVINO in inference stage 
+
+Evaluation environment
+
+```
+OS: macOS Catalina 10.15.4
+CPU: i5-7360U (2C4T, 2.3G →2.6G)
+RAM: 8G 2133 MHz LPDDR3
+PyTorch: 1.5.0
+OpenVINO: 2020.3.194
+Data: Random sample 50 audio from LibriSpeech test-clean
+```
+ 
+We found inference under OpenVINO is two times slower than Pytorch and ONNX runtime. The cause of degrade performance from OpenVINO is unknown, we didn't find any explaination other than lack of optimization for LSTM in OpenVINO.
+
+|  FrameWork | WER  |  Avg Encoding Time | Avg Decoding Time  | Avg Joint Time  | Avg Throughput Per Second |
+|---|---|---|---|---|---|---|---|
+| Pytorch  | 11.08 %  | 12.289 ms  | 0.490 ms  | 0.482 ms  | 5.797 sec/sec  |
+| ONNX  |  11.08 % | 11.850 ms  | 0.462 ms  |  0.496 ms |  **5.989** sec/sec |
+| OpenVINO | 11.08% | 20.296 ms | 0.897 ms | 0.594 ms | 3.543 sec/sec |
+
+
 
 ## Install:
 
