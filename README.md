@@ -1,14 +1,6 @@
-# RNN-Transducer example
+# Online Speech recognition using RNN-Transducer
 
-## TODO
-
-- [x] Parallelize model training
-
-- [x] Use BPE instead of character based tokenizer, should reduce more memory
-
-- [x] Write checkpointing and tensorboardX logger
-
-- [x] Modify wraprnnt-pytorch to compatible with apex mixed precision
+Online speech recognition on Youtube Live video with ( 4 ~ 10 seconds faster than Youtube's caption )
 
 ## Install:
 
@@ -147,3 +139,14 @@ pip install git+https://github.com/mcfletch/sphfile.git
             --input "input_h_enc[1 640],input_h_dec[1 256]" \
             --output_dir ./logs/E6D2-smallbatch/
         ```
+
+
+## TODO
+
+- [x] Parallelize model training
+
+- [x] Use BPE instead of character based tokenizer, should reduce more memory
+
+- [x] Write checkpointing and tensorboardX logger
+
+- [x] Modify wraprnnt-pytorch to compatible with apex mixed precision
