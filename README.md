@@ -24,7 +24,9 @@ Visualize alignment of audio and text, similar to paper in Graves et al 2013.
 
 ## Training Tips
 
-Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by historical data. Our current best model only achive a WER of 16.3% on Librispeech test-clean, which has still a long way to reach the common baseline of around 5%.
+Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by past audio feature. 
+
+Our current best model only achive a WER of 16.3% on Librispeech test-clean, which is still a long way to reach the common baseline of around 5%.
 
 But we still learn some tricks and would like to share with you.
 
@@ -44,15 +46,17 @@ Contradict to the article mentioned above, we found that larger vocabulary size 
 
 3. Some other tips
 
-Big batch size is better as mentioned in all previous RNN-T papers
+Big batch size is better as mentioned in all previous RNN-T papers ( duh )
 
 Train your model as large as possible ( 100M parameters is better )
 
-Time reduction in first and middle layers help to reduce training memory usage  but suffers certain performance hit that we haven't had the resource and time to investigate. We however, think this can be make up by designing much more efficient model architecture. 
+Time reduction in first and middle layers help to reduce training memory usage  but suffers certain performance hit that we haven't had the resource and time to investigate. However, think this can be make up by designing much more efficient model architecture (Maybe GRU for encoder model instead of LSTM ).
 
-Layer norm helps model handle sudden increase of voice pitch during online decoding, however this slows down the convergence speed.
+Layer norm helps model to handle sudden increase of voice pitch during online decoding, this allows us to skip CMVN preprocessing commonly found in online decoding. But this slows down the convergence speed.
 
 Training RNN-T is slow, and any brave warrior who wish to challenge should be patience and expect to own a good compute resource ( ie workstation many GPUs, 1TB of SSD storage ).
+
+We use Adam optimizer for fast convergence in order to meet the deadline for our final project. We experiement with SGD w momentum but find it extremely slow to converge. 
 
 ## Other results
 
