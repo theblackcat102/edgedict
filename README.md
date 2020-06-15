@@ -72,7 +72,7 @@ Data: Random sample 50 audio from LibriSpeech test-clean
 We found inference under OpenVINO is two times slower than Pytorch and ONNX runtime. The cause of degrade performance from OpenVINO is unknown, we didn't find any explaination other than lack of optimization for LSTM in OpenVINO.
 
 |  FrameWork | WER  |  Avg Encoding Time | Avg Decoding Time  | Avg Joint Time  | Avg Throughput Per Second |
-|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|
 | Pytorch  | 11.08 %  | 12.289 ms  | 0.490 ms  | 0.482 ms  | 5.797 sec/sec  |
 | ONNX  |  11.08 % | 11.850 ms  | 0.462 ms  |  0.496 ms |  **5.989** sec/sec |
 | OpenVINO | 11.08% | 20.296 ms | 0.897 ms | 0.594 ms | 3.543 sec/sec |
