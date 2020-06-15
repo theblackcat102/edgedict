@@ -1,7 +1,12 @@
-logs
 .vscode/
 save/
+logs/
 outputs/
+datasets/
+config/
+BPE
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -115,6 +120,10 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+pytorch1.3.1cu101
+pytorch1.4.0cu101
+pytorch1.5.0cu101
+pytorch1.5.0cu102
 
 # Spyder project settings
 .spyderproject

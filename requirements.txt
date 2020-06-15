@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 appnope==0.1.0
 attrs==19.3.0
 audioread==2.1.8
@@ -80,3 +81,15 @@ wcwidth==0.2.3
 webencodings==0.5.1
 widgetsnbextension==3.5.1
 zipp==3.1.0
+=======
+jiwer
+pandas
+sphfile
+tensorboardX
+tensorflow
+tokenizers
+tqdm
+ipython
+librosa
+onnxruntime
+>>>>>>> yilun
