@@ -140,11 +140,11 @@ def pyav_example(filepath, videolink, duration, output_stream=False, infinite=Tr
                     h[:, not_blank, :] = new_h[:, not_blank, :]
                     c[:, not_blank, :] = new_c[:, not_blank, :]    
             # print('finish decode')
-            # track_cnt += 1
-            # if (track_cnt+1) % 200 == 0:
-            #     print('[reset state]')
-            #     reset_hidden_state()
-            #     track_cnt = 0
+            track_cnt += 1
+            if (track_cnt+1) == 200:
+                print('[background]')
+                reset_hidden_state()
+                track_cnt = 0
 
         if output_stream:
             for packet in output_stream.encode(resample_frame):

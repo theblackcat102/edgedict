@@ -6,7 +6,6 @@ from torch import nn, autograd
 import torch.nn.functional as F
 from torchaudio import functional as F_audio
 import math
-from ctc_decoder import decode as ctc_beam
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 import torchaudio
 

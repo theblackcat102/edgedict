@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from torch import nn, autograd
 import torch.nn.functional as F
-from ctc_decoder import decode as ctc_beam
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from recurrent import ResidualRNNModel
 from tokenizer import BOS
