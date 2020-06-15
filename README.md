@@ -2,7 +2,7 @@
 
 Speech to text using RNN Transducer (Graves et al 2013 ) trained on 2000+ hours of audio speech data.
 
-This work is a joint collaboration with @w86763777
+This work is a joint collaboration with [**@w86763777**](http://github.com/w86763777)
 
 ## Highlights
 
