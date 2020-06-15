@@ -52,7 +52,7 @@ Time reduction in first and middle layers help to reduce training memory usage  
 
 Layer norm helps model handle sudden increase of voice pitch during online decoding, however this slows down the convergence speed.
 
-Training RNN-T is slow, and any brave warrior who wants to challenge should be patient and expect to own a good compute resource ( ie many GPUs, 1TB of SSD storage ).
+Training RNN-T is slow, and any brave warrior who wish to challenge should be patience and expect to own a good compute resource ( ie workstation many GPUs, 1TB of SSD storage ).
 
 ## Other results
 
@@ -77,6 +77,16 @@ We found inference under OpenVINO is two times slower than Pytorch and ONNX runt
 | ONNX  |  11.08 % | 11.850 ms  | 0.462 ms  |  0.496 ms |  **5.989** sec/sec |
 | OpenVINO | 11.08% | 20.296 ms | 0.897 ms | 0.594 ms | 3.543 sec/sec |
 
+
+2. ImageNet for speech recognition is still far away?
+
+If you want to do online decoding. However, training a offline decoding CNN based CTC model is fast and low memory usage due to the use of CNN module. We were able to fit a 211 M CNN based model in one RTX 2080 with batch size of 8, but struggle to train a 50M RNN-T model on RTX 2080 with the same batch size.
+
+| Model  | # Param  |  GPU | Time  | Vocab size  | Batch size  |  WER |
+|---|---|---|---|---|---|---|
+| 8 layer Bi-Encoder 1280 hidden size [1]  | > 180M  | 32 x Google TPU 8G ?  |  7 Days | 16k  | 512  |  3.6% |
+|  CNN Based [2] |  211M | 8x NVIDIA Tesla V100 32 GB  | 4.16 Days  | 27 Character  | 512 (fp16)  |  3.7% |
+|  6 layer Encoder 1024 hidden size (ours)  | 50M  | 4 x NVIDIA RTX 2080-Ti 12G  | 3 Days  | 2k  | 128 (32 * 4) (fp16)   | 16.3%  |
 
 
 ## Install:
