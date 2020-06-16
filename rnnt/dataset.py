@@ -120,7 +120,7 @@ class YoutubeCaption(AudioDataset):
     def build(self):
         paths = []
         texts = []
-        wav_path = os.path.join(self.root, self.labels.split('_')[0])
+        wav_path = self.labels.split('_')[0]
         df = pd.read_csv(os.path.join(self.root, self.labels))
         df = df.T.to_dict().values()
         for voice in df:
@@ -241,8 +241,8 @@ def seq_collate(results):
 
 
 if __name__ == "__main__":
-    from tokenizer import CharTokenizer
-    from transforms import build_transform
+    from .tokenizer import CharTokenizer, HuggingFaceTokenizer
+    from .transforms import build_transform
 
     transform_train, transform_test, input_size = build_transform(
         feature_type='logfbank', feature_size=80,
@@ -252,26 +252,22 @@ if __name__ == "__main__":
         T_mask=50, T_num_mask=2,
         F_mask=5, F_num_mask=1
     )
-    tokenizer = CharTokenizer(cache_dir='/tmp')
+    tokenizer = HuggingFaceTokenizer(
+                cache_dir='BPE-2048', vocab_size=2048)
     train_dataloader = DataLoader(
         dataset=MergedDataset([
-            Librispeech(
-                root='./datasets/LibriSpeech/train-other-500',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
-            Librispeech(
-                root='./datasets/LibriSpeech/train-clean-360',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
-            Librispeech(
-                root='./datasets/LibriSpeech/train-clean-100',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
+            # Librispeech(
+            #     root='../speech_data/LibriSpeech/train-other-500',
+            #     tokenizer=tokenizer,
+            #     transform=transform_train,
+            #     audio_max_length=16),
+            # Librispeech(
+            #     root='../speech_data/LibriSpeech/train-clean-360',
+            #     tokenizer=tokenizer,
+            #     transform=transform_train,
+            #     audio_max_length=16),
             TEDLIUM(
-                root="./datasets/TEDLIUM_release-3/data",
+                root="../speech_data/TEDLIUM/TEDLIUM_release1/train",
                 tokenizer=tokenizer,
                 transform=transform_train,
                 audio_max_length=16),
@@ -281,10 +277,21 @@ if __name__ == "__main__":
             #     transform=transform_train,
             #     audio_max_length=14),
             CommonVoice(
-                root='./datasets/common_voice', labels='train.tsv',
+                root='../speech_data/common_voice', labels='train.tsv',
                 tokenizer=tokenizer,
                 transform=transform_train,
-                audio_max_length=16)
+                audio_max_length=16),
+            YoutubeCaption(
+                root='../speech_data/youtube-speech-text', labels='life_meta.csv',
+                tokenizer=tokenizer,
+                transform=transform_train,
+                audio_max_length=16),                    
+            YoutubeCaption(
+                root='../speech_data/youtube-speech-text', labels='english2_meta.csv',
+                tokenizer=tokenizer,
+                transform=transform_train,
+                audio_max_length=16),
+
         ]),
         batch_size=128, shuffle=True, num_workers=32,
         collate_fn=seq_collate, drop_last=True)
@@ -292,7 +299,7 @@ if __name__ == "__main__":
     val_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                './datasets/LibriSpeech/test-clean',
+                '../speech_data/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform_test),
             # Librispeech(

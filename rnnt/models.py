@@ -113,7 +113,7 @@ class ResLayerNormGRU(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout,
-                 proj_size, module=ResLayerNormLSTM):
+                 proj_size, module=ResLayerNormGRU):
         super().__init__()
         self.norm = nn.LayerNorm(input_size)
         self.lstm = module(
@@ -175,7 +175,7 @@ class Transducer(nn.Module):
                  vocab_embed_size, vocab_size, input_size,
                  enc_hidden_size, enc_layers, enc_dropout, enc_proj_size,
                  dec_hidden_size, dec_layers, dec_dropout, dec_proj_size,
-                 joint_size, blank=NUL, module_type='LSTM'):
+                 joint_size, blank=NUL, module_type='LSTM', output_loss=True):
         super().__init__()
         self.blank = blank
         # Encoder
@@ -205,7 +205,9 @@ class Transducer(nn.Module):
             input_size=enc_proj_size + dec_proj_size,
             hidden_size=joint_size,
             vocab_size=vocab_size)
-        # self.loss_fn = RNNTLoss(blank=blank)
+        self.output_loss = output_loss
+        if output_loss:
+            self.loss_fn = RNNTLoss(blank=blank)
 
     def scale_length(self, logits, xlen):
         scale = (xlen.max().float() / logits.shape[1]).ceil()
@@ -219,8 +221,11 @@ class Transducer(nn.Module):
         h_enc, _ = self.encoder(xs)
         h_dec, _ = self.decoder(ys)
         logits = self.joint(h_enc, h_dec)
-        xlen = self.scale_length(logits, xlen)
-        # loss = self.loss_fn(logits, ys, xlen, ylen)
+
+        if self.output_loss:
+            xlen = self.scale_length(logits, xlen)
+            loss = self.loss_fn(logits, ys, xlen, ylen)
+            return loss
 
         return logits
 

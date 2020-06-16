@@ -124,10 +124,12 @@ class HuggingFaceTokenizer:
 
 
 if __name__ == "__main__":
-    texts = ["ab asd fbdbfd ff", "sdca a dsa  ads  a"]
-    tokenizer = HuggingFaceTokenizer(vocab_size=20)
-    tokenizer.build(texts=texts)
+    
+    tokenizer = HuggingFaceTokenizer('BPE-2048',vocab_size=2048)
 
+    texts = [
+        'might have a solution it might take a long time nobody  wrote down the rules clearly  who  designed this'
+    ]
     for text in texts:
         encoded = tokenizer.encode("%s" % text)
         decoded = tokenizer.decode(encoded)

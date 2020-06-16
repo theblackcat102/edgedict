@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 from rnnt.args import FLAGS
-from rnnt.dataset import seq_collate, MergedDataset, Librispeech
+from rnnt.dataset import seq_collate, MergedDataset, Librispeech, CommonVoice, TEDLIUM, YoutubeCaption
 from rnnt.models import Transducer
 from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
@@ -52,7 +52,7 @@ class Trainer:
             self.tokenizer = CharTokenizer(cache_dir=self.logdir)
         else:
             self.tokenizer = HuggingFaceTokenizer(
-                cache_dir=self.logdir, vocab_size=FLAGS.bpe_size)
+                cache_dir='BPE-2048', vocab_size=FLAGS.bpe_size)
 
         # Dataloader
         self.dataloader_train = DataLoader(
@@ -67,21 +67,41 @@ class Trainer:
                     tokenizer=self.tokenizer,
                     transform=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
-                Librispeech(
-                    root=FLAGS.LibriSpeech_train_100,
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
-                # TEDLIUM(
-                #     root=FLAGS.TEDLIUM_train,
+                # Librispeech(
+                #     root=FLAGS.LibriSpeech_train_100,
                 #     tokenizer=self.tokenizer,
                 #     transform=transform_train,
                 #     audio_max_length=FLAGS.audio_max_length),
-                # CommonVoice(
-                #     root=FLAGS.CommonVoice, labels='train.tsv',
-                #     tokenizer=self.tokenizer,
-                #     transform=transform_train,
-                #     audio_max_length=FLAGS.audio_max_length)
+                TEDLIUM(
+                    root=FLAGS.TEDLIUM_train,
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                CommonVoice(
+                    root=FLAGS.CommonVoice, labels='train.tsv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='bloomberg2_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),                    
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
             ]),
             batch_size=FLAGS.batch_size, shuffle=True,
             num_workers=FLAGS.num_workers, collate_fn=seq_collate,

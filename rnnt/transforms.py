@@ -171,8 +171,8 @@ def build_transform(feature_type, feature_size, n_fft=512, win_length=400,
     if delta:
         transform.append(CatDeltas())
         input_size = input_size * 3
-    if cmvn:
-        transform.append(CMVN())
+    # if cmvn:
+    #     transform.append(CMVN())
     if downsample > 1:
         transform.append(Downsample(downsample, pad_to_divisible))
         input_size = input_size * downsample
