@@ -312,11 +312,12 @@ if __name__ == "__main__":
     model = ParallelTraining()
     # with open('test.pt', 'wb') as f:
     #     pickle.dump(model, f)
-    gpus = [0,1,2]
+    gpus = [0,2, 3]
     params = {
-        'gpus': [0, 1, 2],
+        'gpus': gpus,
         'distributed_backend': 'ddp',
         'gradient_clip_val': 10,
+        'val_check_interval': 0.25,
         'accumulate_grad_batches': FLAGS.batch_size // (FLAGS.sub_batch_size*len(gpus))
     }
     if  FLAGS.apex:
