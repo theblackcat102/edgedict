@@ -1,8 +1,10 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-from warprnnt_pytorch import RNNTLoss
-
+try:
+    from warprnnt_pytorch import RNNTLoss
+except:
+    pass
 from rnnt.tokenizer import NUL, BOS, PAD
 
 
@@ -67,13 +69,54 @@ class ResLayerNormLSTM(nn.Module):
         cs = torch.cat(new_cs, dim=0)
         return xs, (hs, cs)
 
+class ResLayerNormGRU(nn.Module):
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 num_layers,
+                 dropout=0,
+                 time_reductions=[1],
+                 reduction_factor=2):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.lstms = nn.ModuleList()
+        self.projs = nn.ModuleList()
+        for i in range(num_layers):
+            self.lstms.append(
+                nn.GRU(input_size, hidden_size, 1, batch_first=True))
+            proj = [nn.LayerNorm(hidden_size)]
+            if i in time_reductions:
+                proj.append(TimeReduction(reduction_factor))
+            if dropout > 0:
+                proj.append(nn.Dropout(dropout))
+            input_size = hidden_size
+            self.projs.append(nn.Sequential(*proj))
+
+    def forward(self, xs, hiddens=None):
+        if hiddens is None:
+            hs = xs.new_zeros(len(self.lstms), xs.shape[0], self.hidden_size)
+        else:
+            hs = hiddens
+        new_hs = []
+        for i, (lstm, proj) in enumerate(zip(self.lstms, self.projs)):
+            lstm.flatten_parameters()
+            xs_next, h = lstm(xs, hs[i, None])
+            if i != 0:
+                xs = xs + xs_next
+            else:
+                xs = xs_next
+            xs = proj(xs)
+            new_hs.append(h)
+        hs = torch.cat(new_hs, dim=0)
+        return xs, hs
+
 
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout,
-                 proj_size):
+                 proj_size, module=ResLayerNormLSTM):
         super().__init__()
         self.norm = nn.LayerNorm(input_size)
-        self.lstm = ResLayerNormLSTM(
+        self.lstm = module(
             input_size, hidden_size, num_layers, dropout=dropout)
         self.proj = nn.Linear(hidden_size, proj_size)
 
@@ -132,16 +175,23 @@ class Transducer(nn.Module):
                  vocab_embed_size, vocab_size, input_size,
                  enc_hidden_size, enc_layers, enc_dropout, enc_proj_size,
                  dec_hidden_size, dec_layers, dec_dropout, dec_proj_size,
-                 joint_size, blank=NUL):
+                 joint_size, blank=NUL, module_type='LSTM'):
         super().__init__()
         self.blank = blank
         # Encoder
+        if module_type not in ['GRU', 'LSTM']:
+            raise ValueError('Unsupported module type')
+        if module_type == 'GRU':
+            module = ResLayerNormGRU
+        else:
+            module = ResLayerNormLSTM
         self.encoder = Encoder(
             input_size=input_size,
             hidden_size=enc_hidden_size,
             num_layers=enc_layers,
             dropout=enc_dropout,
-            proj_size=enc_proj_size)
+            proj_size=enc_proj_size,
+            module=module)
         # Decoder
         self.decoder = Decoder(
             vocab_embed_size=vocab_embed_size,
@@ -155,7 +205,7 @@ class Transducer(nn.Module):
             input_size=enc_proj_size + dec_proj_size,
             hidden_size=joint_size,
             vocab_size=vocab_size)
-        self.loss_fn = RNNTLoss(blank=blank)
+        # self.loss_fn = RNNTLoss(blank=blank)
 
     def scale_length(self, logits, xlen):
         scale = (xlen.max().float() / logits.shape[1]).ceil()
@@ -170,9 +220,9 @@ class Transducer(nn.Module):
         h_dec, _ = self.decoder(ys)
         logits = self.joint(h_enc, h_dec)
         xlen = self.scale_length(logits, xlen)
-        loss = self.loss_fn(logits, ys, xlen, ylen)
+        # loss = self.loss_fn(logits, ys, xlen, ylen)
 
-        return loss
+        return logits
 
     def greedy_decode(self, xs, xlen):
         # encoder
@@ -268,8 +318,14 @@ if __name__ == "__main__":
         input_size=40,
         enc_layers=2,
         dec_layers=1,
-        proj_size=256).cuda()
-    xs = torch.randn((1, 50, 40)).float().cuda()
-    xlen = torch.ones(1).int().cuda() * 50
-    seqs, prob = model.beam_search(xs, xlen, k=3)
-    print(seqs.shape, prob.shape)
+        enc_proj_size=256,
+        enc_hidden_size=128,
+        dec_hidden_size=128,
+        dec_proj_size=124,
+        dec_dropout=0.1, 
+        enc_dropout=0.1,
+        joint_size=10)
+    xs = torch.randn((1, 50, 40)).float()
+    xlen = torch.ones(1).int() * 50
+    seqs, prob = model.greedy_decode(xs, xlen)
+    print(seqs[0], prob[0])
