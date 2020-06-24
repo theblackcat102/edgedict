@@ -6,28 +6,33 @@ flags.DEFINE_enum('mode', 'train', ['train', 'resume', 'eval'], help='mode')
 flags.DEFINE_integer('resume_step', None, help='model step')
 # dataset
 flags.DEFINE_string('LibriSpeech_train_100',
-                    "./datasets/LibriSpeech/train-clean-100",
+                    "../speech_data/LibriSpeech/train-clean-100",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_train_360',
-                    "./datasets/LibriSpeech/train-clean-360",
+                    "../speech_data/LibriSpeech/train-clean-360",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_train_500',
-                    "./datasets/LibriSpeech/train-other-500",
+                    "../speech_data/LibriSpeech/train-other-500",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_test',
-                    "./datasets/LibriSpeech/test-clean",
+                    "../speech_data/LibriSpeech/test-clean",
                     help='LibriSpeech test')
 flags.DEFINE_string('TEDLIUM_train',
-                    "./datasets/TEDLIUM_release-3/data",
-                    help='TEDLIUM 3 train')
+                    "../speech_data/TEDLIUM/TEDLIUM_release1/train",
+                    help='TEDLIUM 1 train')
 flags.DEFINE_string('TEDLIUM_test',
-                    "./datasets/TEDLIUM_release1/test",
+                    "../speech_data/TEDLIUM/TEDLIUM_release1/test",
                     help='TEDLIUM 1 test')
-flags.DEFINE_string('CommonVoice', "./datasets/common_voice",
+flags.DEFINE_string('CommonVoice', "../speech_data/common_voice",
                     help='common voice')
-flags.DEFINE_integer('num_workers', 6, help='dataloader workers')
+flags.DEFINE_string('YT_bloomberg2', "../speech_data/common_voice",
+                    help='common voice')
+flags.DEFINE_string('YT_life', "../speech_data/common_voice",
+                    help='common voice')
+
+flags.DEFINE_integer('num_workers', 4, help='dataloader workers')
 # learning
-flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
+flags.DEFINE_enum('optim', "adam", ['adam', 'sgd', 'sm3'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
 flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')
 flags.DEFINE_integer('sched_patience', 1, help='lr reduce rate on plateau')
@@ -40,6 +45,7 @@ flags.DEFINE_integer('sub_batch_size', 8, help='accumulate batch size')
 flags.DEFINE_integer('eval_batch_size', 4, help='evaluation batch size')
 flags.DEFINE_float('gradclip', None, help='clip norm value')
 # encoder
+flags.DEFINE_string('enc_type', 'LSTM', help='encoder rnn type')
 flags.DEFINE_integer('enc_hidden_size', 600, help='encoder hidden dimension')
 flags.DEFINE_integer('enc_layers', 4, help='encoder layers')
 flags.DEFINE_integer('enc_proj_size', 600, help='encoder layers')

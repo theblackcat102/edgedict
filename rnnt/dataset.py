@@ -1,5 +1,5 @@
 import glob
-import os
+import os, sys
 import pickle
 
 import numpy as np
@@ -120,7 +120,7 @@ class YoutubeCaption(AudioDataset):
     def build(self):
         paths = []
         texts = []
-        wav_path = os.path.join(self.root, self.labels.split('_')[0])
+        wav_path = self.labels.split('_')[0]
         df = pd.read_csv(os.path.join(self.root, self.labels))
         df = df.T.to_dict().values()
         for voice in df:
@@ -241,8 +241,10 @@ def seq_collate(results):
 
 
 if __name__ == "__main__":
-    from tokenizer import CharTokenizer
-    from transforms import build_transform
+    from .tokenizer import CharTokenizer, HuggingFaceTokenizer
+    from .transforms import build_transform
+    from rnnt.args import FLAGS
+    FLAGS(sys.argv)
 
     transform_train, transform_test, input_size = build_transform(
         feature_type='logfbank', feature_size=80,
@@ -252,47 +254,69 @@ if __name__ == "__main__":
         T_mask=50, T_num_mask=2,
         F_mask=5, F_num_mask=1
     )
-    tokenizer = CharTokenizer(cache_dir='/tmp')
+    tokenizer = HuggingFaceTokenizer(
+                cache_dir='BPE-2048', vocab_size=2048)
     train_dataloader = DataLoader(
-        dataset=MergedDataset([
-            Librispeech(
-                root='./datasets/LibriSpeech/train-other-500',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
-            Librispeech(
-                root='./datasets/LibriSpeech/train-clean-360',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
-            Librispeech(
-                root='./datasets/LibriSpeech/train-clean-100',
-                tokenizer=tokenizer,
-                transform=transform_train,
-                audio_max_length=16),
-            # TEDLIUM(
-            #     root="./data/TEDLIUM_release-3/data",
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14),
-            # TEDLIUM(
-            #     root="./data/TEDLIUM_release1/train",
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14),
-            # CommonVoice(
-            #     root='./data/common_voice', labels='train.tsv',
-            #     tokenizer=tokenizer,
-            #     transforms=transform,
-            #     audio_max_length=14)
-        ]),
-        batch_size=128, shuffle=True, num_workers=32,
+            dataset=MergedDataset([
+                Librispeech(
+                    root=FLAGS.LibriSpeech_train_500,
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                Librispeech(
+                    root=FLAGS.LibriSpeech_train_360,
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                # Librispeech(
+                #     root=FLAGS.LibriSpeech_train_100,
+                #     tokenizer=tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length),
+                TEDLIUM(
+                    root=FLAGS.TEDLIUM_train,
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                CommonVoice(
+                    root=FLAGS.CommonVoice, labels='train.tsv',
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='bloomberg2_meta.csv',
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),                    
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
+                    tokenizer=tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
+            ]),
+        batch_size=32, shuffle=True, num_workers=8,
         collate_fn=seq_collate, drop_last=True)
+    for batch in tqdm(train_dataloader):
+        x, y, xlen, ylen = batch
 
     val_dataloader = DataLoader(
         dataset=MergedDataset([
             Librispeech(
-                './datasets/LibriSpeech/test-clean',
+                '../speech_data/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform_test),
             # Librispeech(
@@ -319,12 +343,12 @@ if __name__ == "__main__":
         batch_size=128, shuffle=False, num_workers=32,
         collate_fn=seq_collate)
 
-    tokenizer.build(train_dataloader.dataset.texts())
-    print("==========================")
-    for xs, ys, xlen, ylen in tqdm(train_dataloader):
-        pass
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    # tokenizer.build(train_dataloader.dataset.texts())
+    # print("==========================")
+    # for xs, ys, xlen, ylen in tqdm(train_dataloader):
+    #     pass
+    #     # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
 
-    for xs, ys, xlen, ylen in tqdm(val_dataloader):
-        pass
-        # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
+    # for xs, ys, xlen, ylen in tqdm(val_dataloader):
+    #     pass
+    #     # print(xs.shape, ys.shape, xlen.shape, ylen.shape)
