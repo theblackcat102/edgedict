@@ -17,7 +17,7 @@ from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
 from rnnt.tokenizer import NUL, BOS, PAD
 import pytorch_lightning as pl
-
+from optimizer import SM3, AdamW, Novograd
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
 else:
@@ -144,16 +144,18 @@ class ParallelTraining(pl.LightningModule):
                     self.steps, dataformats='HWC')
         self.logger.experiment.flush()
 
-        if self.best_wer > avg_wer:
+        if self.best_wer > avg_wer and self.epoch > 0:
             print('best checkpoint found!')
-            checkpoint = {
-                'model': self.model.state_dict(),
-                'optimizer': self.optimizer.state_dict(),
-                'epoch': self.epoch
-            }
-            if FLAGS.apex:
-                checkpoint['amp'] = amp.state_dict()
-            torch.save(checkpoint, os.path.join(self.log_path, str(self.epoch)+'amp_checkpoint.pt'))
+            # checkpoint = {
+            #     'model': self.model.state_dict(),
+            #     'optimizer': self.optimizer.state_dict(),
+            #     'epoch': self.epoch
+            # }
+            # if FLAGS.apex:
+            #     checkpoint['amp'] = amp.state_dict()
+            # torch.save(checkpoint, os.path.join(self.log_path, str(self.epoch)+'amp_checkpoint.pt'))
+            self.trainer.save_checkpoint(os.path.join(self.log_path, str(self.epoch)+'amp_checkpoint.pt'))
+
             self.best_wer = avg_wer
 
 
@@ -200,11 +202,14 @@ class ParallelTraining(pl.LightningModule):
 
     def configure_optimizers(self):
         if FLAGS.optim == 'adam':
-            self.optimizer = optim.Adam(
-                self.model.parameters(), lr=FLAGS.lr)
+            self.optimizer = AdamW(
+                self.model.parameters(), lr=FLAGS.lr, weight_decay=1e-5)
+        elif FLAGS.optim == 'sm3':
+            self.optimizer = SM3(
+                self.model.parameters(), lr=FLAGS.lr, momentum=0.0)
         else:
-            self.optimizer = optim.SGD(
-                self.model.parameters(), lr=FLAGS.lr, momentum=0.9)
+            self.optimizer = Novograd(
+                self.model.parameters(), lr=FLAGS.lr, weight_decay=1e-3)
         scheduler = []
         if FLAGS.sched:
             self.plateau_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -214,7 +219,7 @@ class ParallelTraining(pl.LightningModule):
             scheduler= [self.plateau_scheduler]
 
         self.warmup_optimizer_step(0)
-        return [self.optimizer], scheduler
+        return [self.optimizer]
 
     @pl.data_loader
     def train_dataloader(self):
@@ -253,27 +258,32 @@ class ParallelTraining(pl.LightningModule):
                     root=FLAGS.CommonVoice, labels='train.tsv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
                 YoutubeCaption(
                     root='../speech_data/youtube-speech-text/', labels='bloomberg2_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
                 YoutubeCaption(
                     root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),                    
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),                    
                 YoutubeCaption(
                     root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
                 YoutubeCaption(
                     root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),
             ]),
             batch_size=FLAGS.sub_batch_size, shuffle=True,
             num_workers=FLAGS.num_workers, collate_fn=seq_collate,
@@ -312,7 +322,7 @@ if __name__ == "__main__":
     model = ParallelTraining()
     # with open('test.pt', 'wb') as f:
     #     pickle.dump(model, f)
-    gpus = [0,2, 3]
+    gpus = [0,1, 2, 3]
     params = {
         'gpus': gpus,
         'distributed_backend': 'ddp',
@@ -324,15 +334,16 @@ if __name__ == "__main__":
         print('use apex')
         params['amp_level'] = FLAGS.opt_level
         params['precision'] = 16
+        params['min_loss_scale'] = 1.0
 
     from datetime import datetime
     cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    log_name = '{}-{}'.format('rnnt', FLAGS.tokenizer)
+    log_name = '{}-{}'.format('rnnt-m', FLAGS.tokenizer)
     log_path = 'logs/{}'.format(log_name)
     os.makedirs(log_path, exist_ok=True)
 
     model.log_path = log_path
-    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt')
+    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt-m')
     params['logger'] = logger
 
     checkpoint_callback = ModelCheckpoint(
@@ -345,6 +356,8 @@ if __name__ == "__main__":
     )
     params['checkpoint_callback'] = checkpoint_callback
     print(params)
+    # params['resume_from_checkpoint'] = '/home/theblackcat/rnn_transducer/logs/rnnt-bpe/8amp_checkpoint.pt'
     trainer = Trainer(**params)
+    model.trainer = trainer
     trainer.fit(model)
 

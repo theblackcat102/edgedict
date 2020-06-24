@@ -30,9 +30,9 @@ flags.DEFINE_string('YT_bloomberg2', "../speech_data/common_voice",
 flags.DEFINE_string('YT_life', "../speech_data/common_voice",
                     help='common voice')
 
-flags.DEFINE_integer('num_workers', 6, help='dataloader workers')
+flags.DEFINE_integer('num_workers', 4, help='dataloader workers')
 # learning
-flags.DEFINE_enum('optim', "adam", ['adam', 'sgd'], help='optimizer')
+flags.DEFINE_enum('optim', "adam", ['adam', 'sgd', 'sm3'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
 flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')
 flags.DEFINE_integer('sched_patience', 1, help='lr reduce rate on plateau')
