@@ -14,7 +14,10 @@ This work is a joint collaboration with [**@w86763777**](http://github.com/w8676
 
 Using this model we can run online speech recognition on Youtube Live video with ( 4 ~ 10 seconds faster than Youtube's caption ) on an 2.3GHz dual-core Intel Core i5 processor.
 
-![demo online decoding](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/demo-short.gif)
+
+<p align="center">
+  <img width="100%" src="https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/demo-short.gif" alt="demo online decoding">
+</p>
 
 
 Visualize alignment of audio and text, similar to paper in Graves et al 2013.
