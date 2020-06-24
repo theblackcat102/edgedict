@@ -92,10 +92,17 @@ If you want to do online decoding. However, training a offline decoding CNN base
 |  CNN Based [2] |  211M | 8x NVIDIA Tesla V100 32 GB  | 4.16 Days  | 27 Character  | 512 (fp16)  |  3.7% |
 |  6 layer Encoder 1024 hidden size (ours)  | 50M  | 4 x NVIDIA RTX 2080-Ti 12G  | 3 Days  | 2k  | 128 (32 * 4) (fp16)   | 16.3%  |
 
+## Issues:
+
+- Currently dataparallel in pytorch 1.4.0 is broken, so you must use pytorch 1.5.0 and apex in parallel training make sure you have supported cudnn and cuda version
+
+    * a distributed parallel version [lightning.py](https://github.com/theblackcat102/Online-Speech-Recognition/blob/master/lightning.py) is supported for Pytorch 1.4.0
 
 ## Install:
 
 - Install `torch` and `torchaudio` with compatible version
+
+    * make sure your torch and torchaudio is matched ie : torch==1.4.0 must pair with torchaudio==0.4.0
 
 - Install apex
     https://nvidia.github.io/apex/amp.html
@@ -124,6 +131,22 @@ If you want to do online decoding. However, training a offline decoding CNN base
     ```
     pip install -r requirements.txt
     ```
+
+## Training:
+
+Checkout configuration examples under flagfiles and rnnt/args.py for more details about parameters.
+
+For dataparallel training or single GPU training:
+
+```
+python train.py --config flagfiles/E4D1.txt
+```
+
+For distributed training:
+
+```
+python lightning.py --config flagfiles/E4D1.txt
+```
 
 ## Datasets:
 
