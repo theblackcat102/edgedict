@@ -151,6 +151,14 @@ For distributed training:
 python lightning.py --config flagfiles/E4D1.txt
 ```
 
+If the learning rate and batch size is right, you should have a convergence curve as below after 24 hours of training.
+
+<p align="center">
+  <img width="100%" src="https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/training_results.png" alt="convergence curve">
+</p>
+
+
+
 ## Datasets:
 
 ### Common Voice : 178.621 hrs
@@ -169,11 +177,11 @@ tar -zxvf en.tar.gz
 ### Youtube Caption : 118 hrs
 
 
-### Librispeech release 1 : 348 hrs
+### Librispeech release 1 : 1000 hrs
 
-```
-python dataprep_librispeech.py [path/to/data] --download --extract
-```
+Download all the tar.gz files from [here](https://www.openslr.org/12/) and unzip files under a directory LibriSpeech, and point your flagfiles to each directory files
+
+check rnnt/args.py for the argument names
 
 ### TEDLIUM: 118.05 hrs
 
@@ -204,6 +212,8 @@ pip install git+https://github.com/mcfletch/sphfile.git
             │       └──wav              # all the audio
             └──LibriSpeech/
                 ├──train-clean-360/
+                ├──train-clean-100/
+                ├──train-other-500/
                 └──test-clean/
     ```
 
