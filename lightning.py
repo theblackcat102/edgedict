@@ -338,12 +338,12 @@ if __name__ == "__main__":
 
     from datetime import datetime
     cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    log_name = '{}-{}'.format('rnnt-m', FLAGS.tokenizer)
+    log_name = '{}-{}'.format('rnnt-gru', FLAGS.tokenizer)
     log_path = 'logs/{}'.format(log_name)
     os.makedirs(log_path, exist_ok=True)
 
     model.log_path = log_path
-    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt-m')
+    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt-gru')
     params['logger'] = logger
 
     checkpoint_callback = ModelCheckpoint(
@@ -355,8 +355,8 @@ if __name__ == "__main__":
         prefix=''
     )
     params['checkpoint_callback'] = checkpoint_callback
-    print(params)
-    # params['resume_from_checkpoint'] = '/home/theblackcat/rnn_transducer/logs/rnnt-bpe/8amp_checkpoint.pt'
+    # print(params)
+    # params['resume_from_checkpoint'] = '/home/theblackcat/rnn_transducer/logs/rnnt-m-bpe/43amp_checkpoint.pt'
     trainer = Trainer(**params)
     model.trainer = trainer
     trainer.fit(model)

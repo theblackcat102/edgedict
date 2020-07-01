@@ -4,11 +4,26 @@ import os
 import subprocess
 import glob
 from tqdm import tqdm
+import argparse
+import os
+import glob
+import multiprocessing
+import json
+import pandas as pd
 
+
+from rnnt.preprocessing_utils import parallel_preprocess
 
 parser = argparse.ArgumentParser(description="VoxCeleb downloader")
+parser.add_argument('--clip_path', 	type=str, default="data",
+                    help='mp3 directory')
 parser.add_argument('--save_path', 	type=str, default="data",
                     help='Target directory')
+parser.add_argument('--target_sr', type=int, default=16000,
+                    help='Target sample rate. '
+                         'defaults to the input sample rate')
+parser.add_argument('--parallel', type=int, default=multiprocessing.cpu_count(),
+                    help='Number of threads to use when processing audio files')
 args = parser.parse_args()
 
 '''
@@ -17,18 +32,16 @@ args = parser.parse_args()
 
 
 def convert(args):
-    files = glob.glob('%s/clips/*.mp3' % args.save_path)
-    files.sort()
+    datasets = glob.glob('%s/*.mp3' % args.clip_path)
+    datasets.sort()
+    dataset = parallel_preprocess(datasets, '', args.save_path, args.target_sr, None, True, args.parallel)
+    print("[%s] Generating json..." % args.output_json)
+    df = pd.DataFrame(dataset, dtype=object)
 
-    print('Converting files from MP3 to WAV')
-    for fname in tqdm(files):
-        outfile = fname.replace('.mp3', '.wav')
-        if not os.path.exists(outfile):
-            out = subprocess.call(
-                'ffmpeg -y -i %s -ac 1 -vn -acodec pcm_s16le -ar 16000 %s '
-                '>/dev/null 2>/dev/null' % (fname, outfile), shell=True)
-            if out != 0:
-                print('Conversion failed %s.' % fname)
+    # Save json with python. df.to_json() produces back slashed in file paths
+    dataset = df.to_dict(orient='records')
+    with open(args.output_json, 'w') as fp:
+        json.dump(dataset, fp, indent=2)
 
 
 if __name__ == '__main__':
