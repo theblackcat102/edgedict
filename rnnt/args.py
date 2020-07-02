@@ -29,6 +29,10 @@ flags.DEFINE_string('YT_bloomberg2', "../speech_data/common_voice",
                     help='common voice')
 flags.DEFINE_string('YT_life', "../speech_data/common_voice",
                     help='common voice')
+flags.DEFINE_string('AIDataTang_train', "/mnt/ssd0/ray/aidatatang_200zh/corpus/train/",
+                    help='aidata tang train voice')
+flags.DEFINE_string('MAGICDATA_train', "/mnt/ssd0/ray/MAGICDATA/train/",
+                    help='MAGICDATA train voice https://www.openslr.org/68/')
 
 flags.DEFINE_integer('num_workers', 4, help='dataloader workers')
 # learning

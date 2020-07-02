@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from warprnnt_pytorch import RNNTLoss
 from rnnt.args import FLAGS
-from rnnt.dataset import seq_collate, MergedDataset, Librispeech, CommonVoice, TEDLIUM, YoutubeCaption
+from rnnt.dataset import seq_collate, MergedDataset, Librispeech, CommonVoice, TEDLIUM, YoutubeCaption, AIDataTang, MAGICDATA
 from rnnt.models import Transducer
 from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
@@ -43,9 +43,11 @@ class ParallelTraining(pl.LightningModule):
             self.tokenizer = CharTokenizer(cache_dir=self.logdir)
         else:
             self.tokenizer = HuggingFaceTokenizer(
-                cache_dir='BPE-2048', vocab_size=FLAGS.bpe_size)
+                cache_dir='BPE-3000', vocab_size=3000)
+        assert self.tokenizer.tokenizer != None
         self.vocab_size = self.tokenizer.vocab_size
         print(FLAGS.enc_type)
+        print(self.vocab_size)
 
         self.model = Transducer(
             vocab_embed_size=FLAGS.vocab_embed_size,
@@ -234,23 +236,33 @@ class ParallelTraining(pl.LightningModule):
 
         dataloader = DataLoader(
             dataset=MergedDataset([
-                Librispeech(
-                    root=FLAGS.LibriSpeech_train_500,
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
-                Librispeech(
-                    root=FLAGS.LibriSpeech_train_360,
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length),
+                # Librispeech(
+                #     root=FLAGS.LibriSpeech_train_500,
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length),
+                # Librispeech(
+                #     root=FLAGS.LibriSpeech_train_360,
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length),
                 # Librispeech(
                 #     root=FLAGS.LibriSpeech_train_100,
                 #     tokenizer=self.tokenizer,
                 #     transform=transform_train,
                 #     audio_max_length=FLAGS.audio_max_length),
-                TEDLIUM(
-                    root=FLAGS.TEDLIUM_train,
+                # TEDLIUM(
+                #     root=FLAGS.TEDLIUM_train,
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length),
+                MAGICDATA(
+                    root=FLAGS.MAGICDATA_train, labels='TRANS.txt',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                AIDataTang(
+                    root=FLAGS.AIDataTang_train,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
@@ -261,29 +273,29 @@ class ParallelTraining(pl.LightningModule):
                     audio_max_length=FLAGS.audio_max_length,
                     audio_min_length=1),
                 YoutubeCaption(
-                    root='../speech_data/youtube-speech-text/', labels='bloomberg2_meta.csv',
+                    root='../speech_data/youtube-speech-text/', labels='zh_tw_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
                     audio_max_length=FLAGS.audio_max_length,
                     audio_min_length=1),
-                YoutubeCaption(
-                    root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length,
-                    audio_min_length=1),                    
-                YoutubeCaption(
-                    root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length,
-                    audio_min_length=1),
-                YoutubeCaption(
-                    root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
-                    tokenizer=self.tokenizer,
-                    transform=transform_train,
-                    audio_max_length=FLAGS.audio_max_length,
-                    audio_min_length=1),
+                # YoutubeCaption(
+                #     root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length,
+                #     audio_min_length=1),                    
+                # YoutubeCaption(
+                #     root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length,
+                #     audio_min_length=1),
+                # YoutubeCaption(
+                #     root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length,
+                #     audio_min_length=1),
             ]),
             batch_size=FLAGS.sub_batch_size, shuffle=True,
             num_workers=FLAGS.num_workers, collate_fn=seq_collate,
@@ -303,11 +315,12 @@ class ParallelTraining(pl.LightningModule):
 
         val_dataloader = DataLoader(
             dataset=MergedDataset([
-                Librispeech(
-                    root=FLAGS.LibriSpeech_test,
+                CommonVoice(
+                    root=FLAGS.CommonVoice, labels='train.tsv',
                     tokenizer=self.tokenizer,
                     transform=transform_test,
-                    reverse_sorted_by_length=True)]),
+                    audio_max_length=FLAGS.audio_max_length,
+                    audio_min_length=1),]),
             batch_size=FLAGS.eval_batch_size, shuffle=False,
             num_workers=FLAGS.num_workers, collate_fn=seq_collate)
         return val_dataloader
@@ -327,7 +340,7 @@ if __name__ == "__main__":
         'gpus': gpus,
         'distributed_backend': 'ddp',
         'gradient_clip_val': 10,
-        'val_check_interval': 0.25,
+         #'val_check_interval': 0.5,
         'accumulate_grad_batches': FLAGS.batch_size // (FLAGS.sub_batch_size*len(gpus))
     }
     if  FLAGS.apex:
@@ -338,12 +351,12 @@ if __name__ == "__main__":
 
     from datetime import datetime
     cur_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    log_name = '{}-{}'.format('rnnt-gru', FLAGS.tokenizer)
+    log_name = '{}-{}'.format('rnnt-zh', FLAGS.tokenizer)
     log_path = 'logs/{}'.format(log_name)
     os.makedirs(log_path, exist_ok=True)
 
     model.log_path = log_path
-    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt-gru')
+    logger = pl.loggers.tensorboard.TensorBoardLogger('logs', name='rnnt-zh')
     params['logger'] = logger
 
     checkpoint_callback = ModelCheckpoint(

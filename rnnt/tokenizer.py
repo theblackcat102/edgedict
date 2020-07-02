@@ -101,7 +101,7 @@ class HuggingFaceTokenizer:
             ],
         )
         os.makedirs(self.cache_dir, exist_ok=True)
-        self.tokenizer.save(self.cache_dir, self.name)
+        self.tokenizer.save_model(self.cache_dir, self.name)
 
     def encode(self, text):
         token_ids = self.tokenizer.encode(text.lower()).ids
@@ -126,7 +126,7 @@ class HuggingFaceTokenizer:
 if __name__ == "__main__":
     
     tokenizer = HuggingFaceTokenizer('BPE-2048',vocab_size=2048)
-
+    
     texts = [
         'might have a solution it might take a long time nobody  wrote down the rules clearly  who  designed this'
     ]

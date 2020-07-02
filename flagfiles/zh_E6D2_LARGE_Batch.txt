@@ -7,8 +7,8 @@
 --warmup_step=5000
 --epochs=60
 --batch_size=128
---sub_batch_size=7
---eval_batch_size=4
+--sub_batch_size=8
+--eval_batch_size=6
 --enc_type=LSTM
 --enc_hidden_size=1024
 --enc_layers=6
@@ -19,8 +19,8 @@
 --dec_dropout=0.1
 --dec_proj_size=640
 --joint_size=640
-
---audio_max_length=14
+--bpe_size=3000
+--audio_max_length=18
 --feature=logfbank
 --feature_size=80
 --n_fft=512
