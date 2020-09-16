@@ -14,7 +14,7 @@ av.logging.set_level(av.logging.ERROR)
 flags.DEFINE_string('model_name', "last.pt", help='steps of checkpoint')
 flags.DEFINE_integer('step_n_frame', 2, help='input frame(stacked)')
 
-flags.DEFINE_enum('stream_decoder', 'openvino', ['torch', 'openvino'],
+flags.DEFINE_enum('stream_decoder', 'torch', ['torch', 'openvino'],
                   help='stream decoder implementation')
 flags.DEFINE_string('url', 'https://www.youtube.com/watch?v=2EppLNonncc',
                     help='youtube live link')

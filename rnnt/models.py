@@ -298,6 +298,19 @@ class CTCEncoder(nn.Module):
             log_p.append(logprob.sum())
         return y_seq_truncated, -torch.stack(log_p)
 
+def convert_lightning2normal(checkpoint):
+    keys = checkpoint.keys()
+
+    if 'state_dict' in keys:
+        checkpoint = checkpoint['state_dict']
+        keys = checkpoint.keys()
+        if 'model.' in list(keys)[0]:
+            new_checkpoint = {}
+            for key, value in checkpoint.items():
+                new_checkpoint[key.replace('model.', '')] = value
+            checkpoint = {'model': new_checkpoint}
+
+    return checkpoint
 
 if __name__ == "__main__":
     # test model

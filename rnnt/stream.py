@@ -3,9 +3,11 @@ import time
 import os
 import numpy as np
 import torch
-from openvino.inference_engine import IECore
-
-from rnnt.models import Transducer
+try:
+    from openvino.inference_engine import IECore
+except:
+    pass
+from rnnt.models import Transducer, convert_lightning2normal
 from rnnt.transforms import build_transform
 from rnnt.tokenizer import HuggingFaceTokenizer, BOS, NUL
 
@@ -29,7 +31,9 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
         logdir = os.path.join('logs', FLAGS.name)
 
         self.tokenizer = HuggingFaceTokenizer(
-            cache_dir=logdir, vocab_size=FLAGS.bpe_size)
+            cache_dir='BPE-'+str(FLAGS.bpe_size), vocab_size=FLAGS.bpe_size)
+        
+        assert self.tokenizer.tokenizer != None
 
         _, self.transform, input_size = build_transform(
             feature_type=FLAGS.feature, feature_size=FLAGS.feature_size,
@@ -40,7 +44,12 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
             F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask)
 
         model_path = os.path.join(logdir, 'models', FLAGS.model_name)
-        checkpoint = torch.load(model_path, lambda storage, loc: storage)
+        if os.path.exists(model_path):
+            checkpoint = torch.load(model_path, lambda storage, loc: storage)
+        else:
+            model_path = os.path.join(logdir, FLAGS.model_name)
+            checkpoint = torch.load(model_path, lambda storage, loc: storage)
+
         transducer = Transducer(
             vocab_embed_size=FLAGS.vocab_embed_size,
             vocab_size=self.tokenizer.vocab_size,
@@ -54,8 +63,10 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
             dec_dropout=FLAGS.dec_dropout,
             dec_proj_size=FLAGS.dec_proj_size,
             joint_size=FLAGS.joint_size,
+            output_loss=False,
         )
-        transducer.load_state_dict(checkpoint['model'])
+
+        transducer.load_state_dict(convert_lightning2normal(checkpoint)['model'])
         transducer.eval()
         self.encoder = transducer.encoder
         self.decoder = transducer.decoder
@@ -92,6 +103,9 @@ class PytorchStreamDecoder(StreamTransducerDecoder):
             start = time.time()
             prob = self.joint(enc_xs[:, k], self.dec_x[:, 0])
             pred = prob.argmax(dim=-1).item()
+            if self.tokenizer.tokenizer.id_to_token(pred) == '<unk>':
+                prob[:, pred] = 0
+                pred = prob.argmax(dim=-1).item()
             self.joint_elapsed.append(time.time() - start)
 
             if pred != NUL:

@@ -25,6 +25,41 @@ Visualize alignment of audio and text, similar to paper in Graves et al 2013.
 ![visualize alignment](https://github.com/theblackcat102/Online-Speech-Recognition/raw/master/images/visualize.png)
 
 
+## Speech recognition IRL ( in real life)
+
+Pretrained weights are now available in releases [v0.1](https://github.com/theblackcat102/Online-Speech-Recognition/releases/tag/v0.1)
+
+Follow the instruction for project setup
+
+```
+python youtube_live.py --flagfile ./flagfiles/zh_E6D2_LARGE_Batch.txt \
+        --name rnnt-zh-bpe \
+        --model_name zh_70_medium.pt  \
+        --url https://www.youtube.com/watch\?v\=A4FbB8UhNRs
+```
+
+
+```
+python youtube_live.py --flagfile ./flagfiles/E6D2_LARGE_Batch.txt \
+        --name rnnt-m-bpe \
+        --model_name english_43_medium.pt  \
+        --url https://www.youtube.com/watch?v=9Auq9mYxFEE
+```
+
+
+```
+python stream.py --flagfile ./flagfiles/E6D2_LARGE_Batch.txt \
+        --name rnnt-m-bpe \
+        --model_name english_43_medium.pt
+```
+
+```
+python stream.py --flagfile ./flagfiles/E6D2_LARGE_Batch.txt \
+        --name rnnt-m-bpe \
+        --model_name english_43_medium.pt \
+        --path 3729-6852-0035.flac
+```
+
 ## Training Tips
 
 Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by past audio feature. 
