@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
-from tokenizer import HuggingFaceTokenizer, CharTokenizer
+from modules.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from tensorboardX import SummaryWriter
 from torch.nn.utils.rnn import pad_sequence
 import json

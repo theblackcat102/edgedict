@@ -113,17 +113,21 @@ class ResLayerNormGRU(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout,
-                 proj_size, module=ResLayerNormGRU):
+                 proj_size, module=ResLayerNormGRU, 
+                 time_reductions=[1], has_proj=True):
         super().__init__()
         self.norm = nn.LayerNorm(input_size)
         self.lstm = module(
-            input_size, hidden_size, num_layers, dropout=dropout)
-        self.proj = nn.Linear(hidden_size, proj_size)
+            input_size, hidden_size, num_layers, dropout=dropout, time_reductions=time_reductions)
+        self.has_proj = has_proj
+        if has_proj:
+            self.proj = nn.Linear(hidden_size, proj_size)
 
     def forward(self, xs, hiddens=None):
         xs = self.norm(xs)
         xs, hiddens = self.lstm(xs, hiddens)
-        xs = self.proj(xs)
+        if self.has_proj:
+            xs = self.proj(xs)
         return xs, hiddens
 
 
@@ -298,6 +302,51 @@ class CTCEncoder(nn.Module):
             log_p.append(logprob.sum())
         return y_seq_truncated, -torch.stack(log_p)
 
+
+def CausalConv1d(in_channels, out_channels, kernel_size, dilation=1, **kwargs):
+   pad = (kernel_size - 1) * dilation
+   return nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
+
+class DilatedConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1, group_norm_size=1, **kwargs):
+        super().__init__()
+        pad = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
+        self.gn = nn.GroupNorm( group_norm_size, in_channels)
+        self.act = nn.GELU()
+
+    def forward(self, x):
+        x = self.act(x)
+        x = self.gn(x)
+        x = self.conv(x)
+        x = x[:, :, :-self.conv.padding[0]]
+        return x
+
+class FrontEnd(nn.Module):
+    def __init__(self, 
+                    kernel_sizes=(10, 8, 4, 4, 4), 
+                     strides=(5, 4, 2, 2, 2), 
+                     channels=(16, 32, 64, 128, 128), bias=True):
+
+        super().__init__()
+        assert len(kernel_sizes) == len(strides)
+        self.conv1 = CausalConv1d(1, channels[0], kernel_size=kernel_sizes[0], dilation=1, stride=strides[0], bias=bias)
+        self.encode = nn.Sequential(
+            DilatedConvBlock(channels[0], channels[1], kernel_size=kernel_sizes[1], dilation=1, stride=strides[1], group_norm_size=2, bias=bias),
+            DilatedConvBlock(channels[1], channels[2], kernel_size=kernel_sizes[2], dilation=1, stride=strides[2], group_norm_size=2, bias=bias),
+            DilatedConvBlock(channels[2], channels[3], kernel_size=kernel_sizes[3], dilation=1, stride=strides[3], group_norm_size=2, bias=bias),
+            DilatedConvBlock(channels[3], channels[4], kernel_size=kernel_sizes[4], dilation=1, stride=strides[4], group_norm_size=2, bias=bias),
+        )
+
+    def forward(self, x):
+
+        if len(x.shape) < 3: # B x T -> B x 1 x T
+            x = x.unsqueeze(1)
+
+        x = self.conv1(x)
+        x = x[:, :, :-self.conv1.padding[0]]
+        return self.encode(x)
+
 def convert_lightning2normal(checkpoint):
     keys = checkpoint.keys()
 
@@ -330,10 +379,11 @@ if __name__ == "__main__":
     # print(prob.shape)
 
     # test beamsearch
+
     model = Transducer(
         vocab_size=34,
         vocab_embed_size=16,
-        input_size=40,
+        input_size=128,
         enc_layers=2,
         dec_layers=1,
         enc_proj_size=256,
@@ -345,5 +395,12 @@ if __name__ == "__main__":
         joint_size=10)
     xs = torch.randn((1, 50, 40)).float()
     xlen = torch.ones(1).int() * 50
+
+    frontend = FrontEnd()
+    signals = torch.randn((32, 1, 5000)).float()
+    outputs = frontend(signals)
+    xs = outputs.permute(0, 2, 1)
+    xlen = torch.ones(1).int() * outputs.shape[1]
+    print(outputs.shape)
     seqs, prob = model.greedy_decode(xs, xlen)
     print(seqs[0], prob[0])
