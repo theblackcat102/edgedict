@@ -5,17 +5,14 @@ import torch
 import numpy as np
 import torch.optim as optim
 from absl import app
-try:
-    from apex import amp
-except:
-    pass
+from apex import amp
 from tqdm import trange, tqdm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-from rnnt.transforms import build_transform, TrimAudio
+
 from rnnt.args import FLAGS
 from rnnt.dataset import seq_collate, MergedDataset, Librispeech, CommonVoice, TEDLIUM, YoutubeCaption
-from rnnt.models import Transducer, FrontEnd
+from rnnt.models import Transducer
 from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
 
@@ -35,23 +32,6 @@ def infloop(dataloader):
         epoch += 1
 
 
-def load_pretrained_model(frontend, transducer, path='pretrained_test.pt'):
-    state_dict = torch.load(path, map_location='cpu')
-    frontend_dict = frontend.state_dict()
-    transducer_dict = transducer.state_dict()
-
-    for key, tensor in state_dict.items():
-        if 'frontend.' in key:
-            front_key = key.replace('frontend.', '')
-            frontend_dict[front_key] = tensor
-        elif 'encoder.' in key:
-            encoder_key = key
-            transducer_dict[key] = tensor
-
-    frontend.load_state_dict(frontend_dict)
-    transducer.load_state_dict(transducer_dict)
-    return frontend, transducer
-
 class Trainer:
     def __init__(self):
         self.name = FLAGS.name
@@ -59,10 +39,14 @@ class Trainer:
         self.model_dir = os.path.join(self.logdir, 'models')
 
         # Transform
-        transform = torch.nn.Sequential(
-            TrimAudio(sampling_rate=16000, max_audio_length=FLAGS.audio_max_length)
+        transform_train, transform_test, input_size = build_transform(
+            feature_type=FLAGS.feature, feature_size=FLAGS.feature_size,
+            n_fft=FLAGS.n_fft, win_length=FLAGS.win_length,
+            hop_length=FLAGS.hop_length, delta=FLAGS.delta, cmvn=FLAGS.cmvn,
+            downsample=FLAGS.downsample,
+            T_mask=FLAGS.T_mask, T_num_mask=FLAGS.T_num_mask,
+            F_mask=FLAGS.F_mask, F_num_mask=FLAGS.F_num_mask
         )
-        transform_train, transform_test = transform, transform
 
         # Tokenizer
         if FLAGS.tokenizer == 'char':
@@ -75,20 +59,54 @@ class Trainer:
         self.dataloader_train = DataLoader(
             dataset=MergedDataset([
                 Librispeech(
-                    root=FLAGS.LibriSpeech_train_100,
+                    root=FLAGS.LibriSpeech_train_500,
                     tokenizer=self.tokenizer,
                     transform=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
                 Librispeech(
-                    root=FLAGS.LibriSpeech_dev,
+                    root=FLAGS.LibriSpeech_train_360,
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                # Librispeech(
+                #     root=FLAGS.LibriSpeech_train_100,
+                #     tokenizer=self.tokenizer,
+                #     transform=transform_train,
+                #     audio_max_length=FLAGS.audio_max_length),
+                TEDLIUM(
+                    root=FLAGS.TEDLIUM_train,
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                CommonVoice(
+                    root=FLAGS.CommonVoice, labels='train.tsv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='bloomberg2_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='life_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),                    
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='news_meta.csv',
+                    tokenizer=self.tokenizer,
+                    transform=transform_train,
+                    audio_max_length=FLAGS.audio_max_length),
+                YoutubeCaption(
+                    root='../speech_data/youtube-speech-text/', labels='english2_meta.csv',
                     tokenizer=self.tokenizer,
                     transform=transform_train,
                     audio_max_length=FLAGS.audio_max_length),
             ]),
             batch_size=FLAGS.batch_size, shuffle=True,
             num_workers=FLAGS.num_workers, collate_fn=seq_collate,
-            drop_last=True
-        )
+            drop_last=True)
 
         self.dataloader_val = DataLoader(
             dataset=MergedDataset([
@@ -104,40 +122,28 @@ class Trainer:
         self.vocab_size = self.dataloader_train.dataset.tokenizer.vocab_size
 
         # Model
-        self.frontend = FrontEnd(
-            frontend_params = [(10, 5, 32)]+[(3, 2, 128)]*4 + [(2,2,128)] *3,
-            bias=True,
-        )
-
         self.model = Transducer(
             vocab_embed_size=FLAGS.vocab_embed_size,
             vocab_size=self.vocab_size,
-            input_size=128,
+            input_size=input_size,
             enc_hidden_size=FLAGS.enc_hidden_size,
             enc_layers=FLAGS.enc_layers,
             enc_dropout=FLAGS.enc_dropout,
             enc_proj_size=FLAGS.enc_proj_size,
-            enc_time_reductions=[],
             dec_hidden_size=FLAGS.dec_hidden_size,
             dec_layers=FLAGS.dec_layers,
             dec_dropout=FLAGS.dec_dropout,
             dec_proj_size=FLAGS.dec_proj_size,
             joint_size=FLAGS.joint_size,
-        )
-        if FLAGS.use_pretrained:
-            self.frontend, self.model = load_pretrained_model(self.frontend, self.model)
-            print('load pretrained model')
-
-        self.frontend = self.frontend.to(device)
-        self.model = self.model.to(device)
+        ).to(device)
 
         # Optimizer
         if FLAGS.optim == 'adam':
             self.optim = optim.Adam(
-                list(self.model.parameters())+list(self.frontend.parameters()), lr=FLAGS.lr)
+                self.model.parameters(), lr=FLAGS.lr)
         else:
             self.optim = optim.SGD(
-                list(self.model.parameters())+list(self.frontend.parameters()), lr=FLAGS.lr, momentum=0.9)
+                self.model.parameters(), lr=FLAGS.lr, momentum=0.9)
         # Scheduler
         if FLAGS.sched:
             self.sched = optim.lr_scheduler.ReduceLROnPlateau(
@@ -171,19 +177,6 @@ class Trainer:
         looper = infloop(self.dataloader_train)
         losses = []
         steps = len(self.dataloader_train) * FLAGS.epochs
-        
-        step = 0
-
-        val_loss, wer, pred_seqs, true_seqs = self.evaluate()
-        if FLAGS.sched:
-            self.sched.step(val_loss)
-        writer.add_scalar('WER', wer, step)
-        writer.add_scalar('val_loss', val_loss, step)
-        for i in range(FLAGS.sample_size):
-            log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
-            writer.add_text('val/%d' % i, log, step)
-        writer.flush()
-
         with trange(start_step, steps + 1, dynamic_ncols=True) as pbar:
             for step in pbar:
                 if step <= FLAGS.warmup_step:
@@ -214,8 +207,6 @@ class Trainer:
                     for i in range(FLAGS.sample_size):
                         log = "`%s`\n\n`%s`" % (true_seqs[i], pred_seqs[i])
                         writer.add_text('val/%d' % i, log, step)
-                    writer.flush()
-
                     pbar.write(
                         'Epoch %d, step %d, loss: %.4f, WER: %.4f' % (
                             epoch, step, val_loss, wer))
@@ -227,27 +218,13 @@ class Trainer:
         for sub_batch_idx, start_idx in enumerate(start_idxs):
             sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
             xs, ys, xlen, ylen = [x[sub_slice].to(device) for x in batch]
-
-            ys = ys[:, :ylen.max()].contiguous()
-            outputs = self.frontend(xs)
-            xs = outputs.permute(0, 2, 1)
-            max_length = xlen.max()
-            xs_shape = xs.shape[1]
-            xlen_ = torch.floor(xlen.float() / ( max_length.item() / xs_shape )).int()
-
-            # if xlen_.max() != xs.shape[1]:
-            #     print(xlen, xs.shape, max_length, xs_shape, xlen_, xlen.float() / ( max_length.item() / xs_shape ))
-
-            xlen = xlen_
             xs = xs[:, :xlen.max()].contiguous()
-
+            ys = ys[:, :ylen.max()].contiguous()
             loss = self.model(xs, ys, xlen, ylen)
-
             if FLAGS.multi_gpu:
                 loss = loss.mean() / len(start_idxs)
             else:
                 loss = loss / len(start_idxs)
-
             if FLAGS.apex:
                 delay_unscale = sub_batch_idx < len(start_idxs) - 1
                 with amp.scale_loss(
@@ -293,19 +270,8 @@ class Trainer:
 
     def evaluate_step(self, batch):
         xs, ys, xlen, ylen = [x.to(device) for x in batch]
-
-        ys = ys[:, :ylen.max()].contiguous()
-        outputs = self.frontend(xs)
-        xs = outputs.permute(0, 2, 1)
-        max_length = xlen.max()
-        xs_shape = xs.shape[1]
-        xlen_ = torch.floor(xlen.float() / ( max_length.item() / xs_shape )).int()
-
-        xlen = xlen_
-        xs = xs[:, :xlen.max()].contiguous()
-
         xs = xs[:, :xlen.max()]
-
+        ys = ys[:, :ylen.max()].contiguous()
         loss = self.model(xs, ys, xlen, ylen)
         if FLAGS.multi_gpu:
             loss = loss.mean()

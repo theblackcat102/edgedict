@@ -17,7 +17,7 @@ from rnnt.tokenizer import HuggingFaceTokenizer, CharTokenizer
 from rnnt.transforms import build_transform
 from rnnt.tokenizer import NUL, BOS, PAD
 import pytorch_lightning as pl
-from optimizer import SM3, AdamW, Novograd
+from modules.optimizer import SM3, AdamW, Novograd
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
 else:

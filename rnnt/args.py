@@ -6,17 +6,20 @@ flags.DEFINE_enum('mode', 'train', ['train', 'resume', 'eval'], help='mode')
 flags.DEFINE_integer('resume_step', None, help='model step')
 # dataset
 flags.DEFINE_string('LibriSpeech_train_100',
-                    "../speech_data/LibriSpeech/train-clean-100",
+                    "../librispeech/LibriSpeech/train-clean-100",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_train_360',
-                    "../speech_data/LibriSpeech/train-clean-360",
+                    "../librispeech/LibriSpeech/train-clean-360",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_train_500',
-                    "../speech_data/LibriSpeech/train-other-500",
+                    "../librispeech/LibriSpeech/train-other-500",
                     help='LibriSpeech train')
 flags.DEFINE_string('LibriSpeech_test',
-                    "../speech_data/LibriSpeech/test-clean",
+                    "../librispeech/LibriSpeech/test-clean",
                     help='LibriSpeech test')
+flags.DEFINE_string('LibriSpeech_dev',
+                    "../librispeech/LibriSpeech/dev-clean",
+                    help='LibriSpeech dev')
 flags.DEFINE_string('TEDLIUM_train',
                     "../speech_data/TEDLIUM/TEDLIUM_release1/train",
                     help='TEDLIUM 1 train')
@@ -32,6 +35,7 @@ flags.DEFINE_string('YT_life', "../speech_data/common_voice",
 
 flags.DEFINE_integer('num_workers', 4, help='dataloader workers')
 # learning
+flags.DEFINE_bool('use_pretrained', default=False, help='Use pretrained enncoder')
 flags.DEFINE_enum('optim', "adam", ['adam', 'sgd', 'sm3'], help='optimizer')
 flags.DEFINE_float('lr', 1e-4, help='initial lr')
 flags.DEFINE_bool('sched', True, help='lr reduce rate on plateau')

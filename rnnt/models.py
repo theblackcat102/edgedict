@@ -1,12 +1,17 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+import math
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
 try:
     from warprnnt_pytorch import RNNTLoss
 except:
     pass
-from rnnt.tokenizer import NUL, BOS, PAD
 
+from rnnt.tokenizer import NUL, BOS, PAD
+from modules.group_norm import Fp32GroupNorm
 
 class TimeReduction(nn.Module):
     def __init__(self, reduction_factor=2):
@@ -113,7 +118,7 @@ class ResLayerNormGRU(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout,
-                 proj_size, module=ResLayerNormGRU, 
+                 proj_size, module=ResLayerNormGRU,
                  time_reductions=[1], has_proj=True):
         super().__init__()
         self.norm = nn.LayerNorm(input_size)
@@ -179,7 +184,8 @@ class Transducer(nn.Module):
                  vocab_embed_size, vocab_size, input_size,
                  enc_hidden_size, enc_layers, enc_dropout, enc_proj_size,
                  dec_hidden_size, dec_layers, dec_dropout, dec_proj_size,
-                 joint_size, blank=NUL, module_type='LSTM', output_loss=True):
+                 joint_size, enc_time_reductions=[1],
+                 blank=NUL, module_type='LSTM', output_loss=True):
         super().__init__()
         self.blank = blank
         # Encoder
@@ -195,6 +201,7 @@ class Transducer(nn.Module):
             num_layers=enc_layers,
             dropout=enc_dropout,
             proj_size=enc_proj_size,
+            time_reductions=enc_time_reductions,
             module=module)
         # Decoder
         self.decoder = Decoder(
@@ -304,14 +311,18 @@ class CTCEncoder(nn.Module):
 
 
 def CausalConv1d(in_channels, out_channels, kernel_size, dilation=1, **kwargs):
-   pad = (kernel_size - 1) * dilation
-   return nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
+    pad = (kernel_size - 1) * dilation
+    conv  = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
+    nn.init.kaiming_normal_(conv.weight)
+    return conv
 
 class DilatedConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, dilation=1, group_norm_size=1, **kwargs):
         super().__init__()
         pad = (kernel_size - 1) * dilation
         self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
+
+        nn.init.kaiming_normal_(self.conv.weight)
         self.gn = nn.GroupNorm( group_norm_size, in_channels)
         self.act = nn.GELU()
 
@@ -323,20 +334,20 @@ class DilatedConvBlock(nn.Module):
         return x
 
 class FrontEnd(nn.Module):
-    def __init__(self, 
-                    kernel_sizes=(10, 8, 4, 4, 4), 
-                     strides=(5, 4, 2, 2, 2), 
-                     channels=(16, 32, 64, 128, 128), bias=True):
+    def __init__(self, frontend_params = [(10, 5, 16)]+[ (8, 4, 32) ]+[(4,2,128)]*3, bias=True):
 
         super().__init__()
+        kernel_sizes=[ p[0] for p in frontend_params]
+        strides=[ p[1] for p in frontend_params] 
+        channels=[ p[2] for p in frontend_params]
+
         assert len(kernel_sizes) == len(strides)
         self.conv1 = CausalConv1d(1, channels[0], kernel_size=kernel_sizes[0], dilation=1, stride=strides[0], bias=bias)
-        self.encode = nn.Sequential(
-            DilatedConvBlock(channels[0], channels[1], kernel_size=kernel_sizes[1], dilation=1, stride=strides[1], group_norm_size=2, bias=bias),
-            DilatedConvBlock(channels[1], channels[2], kernel_size=kernel_sizes[2], dilation=1, stride=strides[2], group_norm_size=2, bias=bias),
-            DilatedConvBlock(channels[2], channels[3], kernel_size=kernel_sizes[3], dilation=1, stride=strides[3], group_norm_size=2, bias=bias),
-            DilatedConvBlock(channels[3], channels[4], kernel_size=kernel_sizes[4], dilation=1, stride=strides[4], group_norm_size=2, bias=bias),
-        )
+
+        self.encode = nn.Sequential(*[
+            DilatedConvBlock(channels[idx-1], channels[idx], kernel_size=kernel_sizes[idx], dilation=1, stride=strides[idx], group_norm_size=1, bias=bias)
+            for idx in range(1, len(strides))
+        ])
 
     def forward(self, x):
 
@@ -360,6 +371,88 @@ def convert_lightning2normal(checkpoint):
             checkpoint = {'model': new_checkpoint}
 
     return checkpoint
+
+
+class ConvFeatureExtractionModel(nn.Module):
+    def __init__(
+        self,
+        conv_layers: List[Tuple[int, int, int]],
+        dropout: float = 0.0,
+        mode: str = "default",
+        conv_bias: bool = False,
+    ):
+        super().__init__()
+
+        assert mode in {"default", "layer_norm"}
+
+        def block(
+            n_in,
+            n_out,
+            k,
+            stride,
+            is_layer_norm=False,
+            is_group_norm=False,
+            conv_bias=False,
+        ):
+            def make_conv():
+                conv = nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias)
+                nn.init.kaiming_normal_(conv.weight)
+                return conv
+
+            assert (
+                is_layer_norm and is_group_norm
+            ) == False, "layer norm and group norm are exclusive"
+
+            if is_layer_norm:
+                return nn.Sequential(
+                    make_conv(),
+                    nn.Dropout(p=dropout),
+                    nn.Sequential(
+                        TransposeLast(),
+                        Fp32LayerNorm(dim, elementwise_affine=True),
+                        TransposeLast(),
+                    ),
+                    nn.GELU(),
+                )
+            elif is_group_norm:
+                return nn.Sequential(
+                    make_conv(),
+                    nn.Dropout(p=dropout),
+                    Fp32GroupNorm(dim, dim, affine=True),
+                    nn.GELU(),
+                )
+            else:
+                return nn.Sequential(make_conv(), nn.Dropout(p=dropout), nn.GELU())
+
+        in_d = 1
+        self.conv_layers = nn.ModuleList()
+        for i, cl in enumerate(conv_layers):
+            assert len(cl) == 3, "invalid conv definition: " + str(cl)
+            (dim, k, stride) = cl
+
+            self.conv_layers.append(
+                block(
+                    in_d,
+                    dim,
+                    k,
+                    stride,
+                    is_layer_norm=mode == "layer_norm",
+                    is_group_norm=mode == "default" and i == 0,
+                    conv_bias=conv_bias,
+                )
+            )
+            in_d = dim
+
+    def forward(self, x):
+
+        # BxT -> BxCxT
+        x = x.unsqueeze(1)
+
+        for conv in self.conv_layers:
+            x = conv(x)
+
+        return x
+
 
 if __name__ == "__main__":
     # test model
@@ -390,7 +483,7 @@ if __name__ == "__main__":
         enc_hidden_size=128,
         dec_hidden_size=128,
         dec_proj_size=124,
-        dec_dropout=0.1, 
+        dec_dropout=0.1,
         enc_dropout=0.1,
         joint_size=10)
     xs = torch.randn((1, 50, 40)).float()
