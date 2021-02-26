@@ -60,6 +60,13 @@ python stream.py --flagfile ./flagfiles/E6D2_LARGE_Batch.txt \
         --path 3729-6852-0035.flac
 ```
 
+### Update
+
+```
+26 February 2021 : updated with pretraining method wav 2.0
+```
+
+
 ## Training Tips
 
 Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by past audio feature. 
@@ -145,7 +152,7 @@ If you want to do online decoding. However, training a offline decoding CNN base
 - Install apex
     https://nvidia.github.io/apex/amp.html
 
-    ```
+    ```bash
     git clone https://github.com/NVIDIA/apex
     cd apex
     pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
@@ -153,7 +160,8 @@ If you want to do online decoding. However, training a offline decoding CNN base
 
 - Install warprnnt-pytorch
     https://github.com/HawkAaron/warp-transducer
-    ```
+
+    ```bash
     git clone https://github.com/HawkAaron/warp-transducer
     cd warp-transducer
     mkdir build
@@ -162,11 +170,13 @@ If you want to do online decoding. However, training a offline decoding CNN base
     make
     cd ../pytorch_binding
     export CUDA_HOME="/usr/local/cuda"
+    export CFLAGS="-I$CUDA_HOME/include $CFLAGS"
+    export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
     python setup.py install
     ```
 
 - Install other dependencies
-    ```
+    ```bash
     pip install -r requirements.txt
     ```
 
@@ -177,13 +187,13 @@ Checkout configuration examples under flagfiles and rnnt/args.py for more detail
 For dataparallel training or single GPU training:
 
 ```
-python train.py --config flagfiles/E4D1.txt
+python -m cli.train --config flagfiles/E4D1.txt
 ```
 
 For distributed training:
 
 ```
-python lightning.py --config flagfiles/E4D1.txt
+python -m cli.lightning --config flagfiles/E4D1.txt
 ```
 
 If the learning rate and batch size is right, you should have a convergence curve as below after 24 hours of training.

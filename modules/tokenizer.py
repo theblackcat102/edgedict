@@ -4,6 +4,10 @@ from torch.nn.utils.rnn import pad_sequence
 from torch import Tensor
 from parts.text.cleaners import english_cleaners
 
+'''
+Not to be confused with tokenizers package
+'''
+
 BOS = 1
 
 def zero_pad_concat(inputs):
@@ -69,7 +73,7 @@ class CharTokenizer():
             sentences.append(self.decode(tokens))
         return sentences
 
-from tokenizers import CharBPETokenizer
+from modules.tokenizers import CharBPETokenizer
 
 
 class HuggingFaceTokenizer():

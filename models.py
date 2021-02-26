@@ -5,7 +5,7 @@ from torch import nn, autograd
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from recurrent import ResidualRNNModel
-from tokenizer import BOS
+from modules.tokenizer import BOS
 
 def fast_tanh(x):
     return x / (1 + x.abs())

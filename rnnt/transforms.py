@@ -146,6 +146,22 @@ class TimeMasking(torch.nn.Module):
         return format_string
 
 
+class TrimAudio(torch.nn.Module):
+    '''Trim raw audio into the maximum length
+        sampling_rate: sampling rate for audio raw signal, default 16800
+        max_audio_length: maximum audio length in seconds
+    '''
+    def __init__(self, sampling_rate=16800, max_audio_length=10, truncate_end=True):
+        super().__init__()
+        self.truncate_end = truncate_end
+        self.max_length = int(sampling_rate*max_audio_length)
+
+    def forward(self, x):
+
+        if self.truncate_end:
+            return x[:, :self.max_length]
+        return x[:, -self.max_length:]
+
 def build_transform(feature_type, feature_size, n_fft=512, win_length=400,
                     hop_length=200, delta=False, cmvn=False, downsample=1,
                     T_mask=0, T_num_mask=0, F_mask=0, F_num_mask=0,
