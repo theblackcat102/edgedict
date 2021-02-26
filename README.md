@@ -60,6 +60,13 @@ python stream.py --flagfile ./flagfiles/E6D2_LARGE_Batch.txt \
         --path 3729-6852-0035.flac
 ```
 
+### Update
+
+```
+26 February 2021 : updated with pretraining method wav 2.0
+```
+
+
 ## Training Tips
 
 Most of our insights share some similarity with this article: [Towards an ImageNet Moment for Speech-to-Text](https://thegradient.pub/towards-an-imagenet-moment-for-speech-to-text/). The difference is between our work and the mentioned article is that we mainly focus in online decoding, hence limit ourselves to RNN Transducer loss with uni-directional recurrent network. Hence, training requires more parameters and resource as we are limited by past audio feature. 

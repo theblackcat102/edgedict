@@ -1,7 +1,7 @@
 import os
-
-import jiwer
 import torch
+torch.manual_seed(10)
+import jiwer
 import numpy as np
 import torch.optim as optim
 from absl import app
