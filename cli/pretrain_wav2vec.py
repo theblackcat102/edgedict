@@ -70,36 +70,36 @@ if __name__ == '__main__':
 
     dataloader = DataLoader(
         dataset=MergedDataset([
-            # YoutubeCaption(
-            #     '../yt_speech/', labels='news_dummy.csv',
-            #     tokenizer=tokenizer,
-            #     transform=transform,
-            #     audio_max_length=14,
-            # ),
-            # YoutubeCaption(
-            #     '../yt_speech/', labels='life_dummy.csv',
-            #     tokenizer=tokenizer,
-            #     transform=transform,
-            #     audio_max_length=14,
-            # ),
-            # Librispeech(
-            #     '../librispeech/LibriSpeech/dev-clean',
-            #     tokenizer=tokenizer,
-            #     transform=transform),
-            # Librispeech(
-            #     '../librispeech/LibriSpeech/dev-other',
-            #     tokenizer=tokenizer,
-            #     transform=transform),
+            YoutubeCaption(
+                '../yt_speech/', labels='news_dummy.csv',
+                tokenizer=tokenizer,
+                transform=transform,
+                audio_max_length=14,
+            ),
+            YoutubeCaption(
+                '../yt_speech/', labels='life_dummy.csv',
+                tokenizer=tokenizer,
+                transform=transform,
+                audio_max_length=14,
+            ),
             Librispeech(
-                '/mnt/ssd0/ray/LibriSpeech/test-other',
+                '../librispeech/LibriSpeech/dev-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '/mnt/ssd1/ray/LibriSpeech/train-clean-360',
+                '../librispeech/LibriSpeech/dev-other',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '/mnt/ssd1/ray/LibriSpeech/train-clean-100',
+                '../librispeech/LibriSpeech/test-other',
+                tokenizer=tokenizer,
+                transform=transform),
+            Librispeech(
+                '../librispeech/LibriSpeech/train-clean-360',
+                tokenizer=tokenizer,
+                transform=transform),
+            Librispeech(
+                '../librispeech/LibriSpeech/train-clean-100',
                 tokenizer=tokenizer,
                 transform=transform),
         ]),
@@ -109,7 +109,7 @@ if __name__ == '__main__':
 
     val_dataloader =  DataLoader(
                 dataset=Librispeech(
-                '/mnt/ssd0/ray/LibriSpeech/test-clean',
+                '../librispeech/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             batch_size=50, shuffle=True, num_workers=4,
@@ -118,7 +118,7 @@ if __name__ == '__main__':
 
     model = Wav2Vec(
         frontend_params = [(10, 5, 32)]+[(3, 2, 128)]*4 + [(2, 2, 128)] *3,
-        front_bias=True,
+        front_bias=False,
         quantize_input=False,
         quantize_targets=True,
         input_size=128,
@@ -127,7 +127,7 @@ if __name__ == '__main__':
         enc_dropout=FLAGS.enc_dropout,
         enc_proj_size=FLAGS.enc_proj_size,
         num_negatives=FLAGS.num_negatives,
-        feature_grad_mult=0.1,
+        feature_grad_mult=FLAGS.feature_grad_mult,
         latent_temp=(FLAGS.init_temp, FLAGS.min_temp, FLAGS.temp_decay),
     )
 
@@ -216,6 +216,6 @@ if __name__ == '__main__':
                         tensorboard.add_scalar('val/'+key, value, global_step)
                     tensorboard.flush()
                     if eval_output['correct'] > best_correct:
-                        if FLAGS.multi_gpu
-                        torch.save(model.module.state_dict(), 'pretrained_test.pt')
+                        if FLAGS.multi_gpu:
+                            torch.save(model.module.state_dict(), 'pretrained_test.pt')
                         best_correct = eval_output['correct']

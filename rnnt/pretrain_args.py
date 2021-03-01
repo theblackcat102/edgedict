@@ -20,6 +20,8 @@ flags.DEFINE_float('min_temp', 0.1, help='minimal temperature value')
 flags.DEFINE_float('temp_decay', 0.999995, help='minimal temperature value')
 flags.DEFINE_integer('num_workers', 8, help='dataloader workers')
 flags.DEFINE_integer('eval_iteration', 1000, help='evaluate every iterations')
+flags.DEFINE_float('feature_grad_mult', 0.1, help='feature gradient multiplication weight')
+
 
 flags.DEFINE_integer('num_negatives', 100, help='num negatives sample for constrastive learning')
 flags.DEFINE_integer('enc_proj_size', 512, help='encoder projection size')
