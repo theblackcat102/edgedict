@@ -1,7 +1,7 @@
 import torch
+import sys, os
 from rnnt.tokenizer import CharTokenizer, HuggingFaceTokenizer
 from rnnt.transforms import build_transform, TrimAudio
-from rnnt.args import FLAGS
 from rnnt.dataset import Librispeech, seq_collate, MergedDataset
 from torch.utils.data import DataLoader, Dataset
 from modules.optimizer import AdamW
@@ -10,6 +10,10 @@ from rnnt.wav2vec import Wav2Vec, ConstrastiveCriterion
 import numpy as np
 from tqdm import tqdm
 from torch.optim.lr_scheduler import LambdaLR
+from rnnt.pretrain_args import FLAGS
+
+FLAGS(sys.argv)
+
 
 def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
     def lr_lambda(current_step):
@@ -18,7 +22,6 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
         return learning_rate
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-
 
 def get_params_without_weight_decay_ln(named_params, weight_decay):
     no_decay = ['bias', 'LayerNorm.weight']
@@ -64,107 +67,128 @@ if __name__ == '__main__':
 
     dataloader = DataLoader(
         dataset=MergedDataset([
+            # Librispeech(
+            #     '../librispeech/LibriSpeech/dev-clean',
+            #     tokenizer=tokenizer,
+            #     transform=transform),
+            # Librispeech(
+            #     '../librispeech/LibriSpeech/dev-other',
+            #     tokenizer=tokenizer,
+            #     transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/dev-clean',
+                '/mnt/ssd0/ray/LibriSpeech/test-other',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/dev-other',
+                '/mnt/ssd1/ray/LibriSpeech/train-clean-360',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/test-other',
-                tokenizer=tokenizer,
-                transform=transform),
-            Librispeech(
-                '../librispeech/LibriSpeech/train-clean-360',
-                tokenizer=tokenizer,
-                transform=transform),
-            Librispeech(
-                '../librispeech/LibriSpeech/train-clean-100',
+                '/mnt/ssd1/ray/LibriSpeech/train-clean-100',
                 tokenizer=tokenizer,
                 transform=transform),
         ]),
-        batch_size=50, shuffle=True, num_workers=4,
+        batch_size=FLAGS.batch_size, shuffle=True, num_workers=FLAGS.num_workers,
         collate_fn=seq_collate
     )
 
     val_dataloader =  DataLoader(
                 dataset=Librispeech(
-                '../librispeech/LibriSpeech/test-clean',
+                '/mnt/ssd0/ray/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             batch_size=50, shuffle=True, num_workers=4,
             collate_fn=seq_collate
         )
 
-
     model = Wav2Vec(
-        frontend_params = [(10, 5, 32)]+[(3, 2, 128)]*4 + [(2,2,128)] *3,
+        frontend_params = [(10, 5, 32)]+[(3, 2, 128)]*4 + [(2, 2, 128)] *3,
         front_bias=True,
         quantize_input=False,
         quantize_targets=True,
         input_size=128,
-        enc_hidden_size=512, enc_layers=4, enc_dropout=0.1, enc_proj_size=512,
-        num_negatives=100,
+        enc_hidden_size=FLAGS.enc_hidden_size,
+        enc_layers=FLAGS.enc_layers,
+        enc_dropout=FLAGS.enc_dropout,
+        enc_proj_size=FLAGS.enc_proj_size,
+        num_negatives=FLAGS.num_negatives,
         feature_grad_mult=0.1,
-        latent_temp=(1, 0.1, 0.999995),
+        latent_temp=(FLAGS.init_temp, FLAGS.min_temp, FLAGS.temp_decay),
     )
+
     model = model.cuda()
 
-    constrast_learner = ConstrastiveCriterion(infonce=True, 
-        loss_weights=[0.1, 1], 
+    constrast_learner = ConstrastiveCriterion(infonce=True,
+        loss_weights=[FLAGS.prob_perplex, FLAGS.code_perplex],
         log_keys=["prob_perplexity", "code_perplexity", "temp"])
 
     global_step = 0
     optimizer = AdamW(
-        model.parameters(), lr=1e-4, weight_decay=1e-5, betas=(0.9,0.98), eps=1e-06)
+        get_params_without_weight_decay_ln(model.named_parameters(), 1e-5),
+        lr=FLAGS.lr, betas=(0.9, 0.999), eps=1e-08)
 
-    total_epochs = 50
+    total_epochs = FLAGS.epochs
     total_iterations = len(dataloader) * total_epochs
-    lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=5000, 
+    lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=FLAGS.warmup_step,
             num_training_steps=total_iterations)
 
-    tensorboard = SummaryWriter('logging/wav2vec_test1')
+    tensorboard = SummaryWriter('logging/'+FLAGS.name)
+    tensorboard.add_text(
+        'flagfile', FLAGS.flags_into_string().replace('\n', '\n\n'))
+    FLAGS.append_flags_into_file(os.path.join('logging/'+FLAGS.name, 'flagfile.txt'))
 
     eval_output = evaluate(model, val_dataloader)
     for key, value in eval_output.items():
         tensorboard.add_scalar('val/'+key, value, global_step)
 
+    start_idxs = list(range(0, FLAGS.batch_size, FLAGS.sub_batch_size))
 
-    for e in tqdm(range(total_epochs), dynamic_ncols=True):
-        for batch in dataloader:
-            optimizer.zero_grad()
-            raw_audio = batch[0]
+    best_correct = -1
 
-            raw_audio = raw_audio.cuda()
-            loss, sample_size, logging_output = constrast_learner(model, raw_audio, reduce=False)
+    with tqdm(total=int(len(dataloader)*total_epochs), dynamic_ncols=True) as pbar:
+        for e in range(total_epochs):
 
-            scale = 1.0
-            if 'num_samples' in logging_output:
-                scale = logging_output['num_samples']
-            loss = loss / scale
-            loss.backward()
+            for batch in dataloader:
+                optimizer.zero_grad()
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+                start_idxs = range(0, FLAGS.batch_size, FLAGS.sub_batch_size)
+                losses = []
+                for sub_batch_idx, start_idx in enumerate(start_idxs):
+                    sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
+                    raw_audio = batch[0]
+                    raw_audios = raw_audio[sub_slice]
 
-            optimizer.step()
-            lr_scheduler.step()
+                    raw_audios = raw_audios.cuda()
+                    loss, sample_size, logging_output = constrast_learner(model, raw_audios, reduce=False)
 
-            if model.quantizer:
-                model.quantizer.set_num_updates(global_step)
-            if model.input_quantizer:
-                model.input_quantizer.set_num_updates(global_step)
+                    loss = loss / len(start_idxs)
+                    losses.append(loss)
+                    loss.backward()
+                loss = torch.stack(losses).mean()
 
-            for key, value in logging_output.items():
-                tensorboard.add_scalar('train/'+key, value, global_step)
-            global_step += 1
-            # print(logging_output)
+                if FLAGS.gradclip is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), FLAGS.gradclip)
 
-        if (e+1) % 2:
-            eval_output = evaluate(model, val_dataloader)
-            for key, value in eval_output.items():
-                tensorboard.add_scalar('val/'+key, value, global_step)
-            tensorboard.flush()
+                optimizer.step()
+                lr_scheduler.step()
 
-        torch.save(model.state_dict(), 'pretrained_test.pt')
+                if model.quantizer:
+                    model.quantizer.set_num_updates(global_step)
+                if model.input_quantizer:
+                    model.input_quantizer.set_num_updates(global_step)
+
+                for key, value in logging_output.items():
+                    tensorboard.add_scalar('train/'+key, value, global_step)
+
+                global_step += 1
+                pbar.update(1)
+                pbar.set_description('Epoch %d, loss: %.4f' % (e, loss.item()))
+
+                if (global_step) % FLAGS.eval_iteration == 0:
+                    eval_output = evaluate(model, val_dataloader)
+                    for key, value in eval_output.items():
+                        tensorboard.add_scalar('val/'+key, value, global_step)
+                    tensorboard.flush()
+                    if eval_output['correct'] > best_correct:
+                        torch.save(model.state_dict(), 'pretrained_test.pt')
+                        best_correct = eval_output['correct']

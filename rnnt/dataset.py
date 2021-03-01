@@ -97,7 +97,7 @@ class AudioDataset(Dataset):
         try:
             data, sr = torchaudio.load(path, normalization=True)
         except Exception:
-            print("Failt to load %s, closed" % path)
+            print("Fail to load %s, closed" % path)
             exit(0)
         if self.transform is not None:
             data = self.transform(data[:1])[0].T
