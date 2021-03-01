@@ -2,7 +2,7 @@ import torch
 import sys, os
 from rnnt.tokenizer import CharTokenizer, HuggingFaceTokenizer
 from rnnt.transforms import build_transform, TrimAudio
-from rnnt.dataset import Librispeech, seq_collate, MergedDataset
+from rnnt.dataset import Librispeech, seq_collate, MergedDataset, YoutubeCaption
 from torch.utils.data import DataLoader, Dataset
 from modules.optimizer import AdamW
 from tensorboardX import SummaryWriter
@@ -67,24 +67,36 @@ if __name__ == '__main__':
 
     dataloader = DataLoader(
         dataset=MergedDataset([
-            # Librispeech(
-            #     '../librispeech/LibriSpeech/dev-clean',
-            #     tokenizer=tokenizer,
-            #     transform=transform),
-            # Librispeech(
-            #     '../librispeech/LibriSpeech/dev-other',
-            #     tokenizer=tokenizer,
-            #     transform=transform),
+            YoutubeCaption(
+                '../yt_speech/', labels='news_dummy.csv',
+                tokenizer=tokenizer,
+                transform=transform,
+                audio_max_length=14,
+            ),
+            YoutubeCaption(
+                '../yt_speech/', labels='life_dummy.csv',
+                tokenizer=tokenizer,
+                transform=transform,
+                audio_max_length=14,
+            ),
             Librispeech(
-                '/mnt/ssd0/ray/LibriSpeech/test-other',
+                '../librispeech/LibriSpeech/dev-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '/mnt/ssd1/ray/LibriSpeech/train-clean-360',
+                '../librispeech/LibriSpeech/dev-other',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '/mnt/ssd1/ray/LibriSpeech/train-clean-100',
+                '../librispeech/LibriSpeech/test-other',
+                tokenizer=tokenizer,
+                transform=transform),
+            Librispeech(
+                '../librispeech/LibriSpeech/train-clean-360',
+                tokenizer=tokenizer,
+                transform=transform),
+            Librispeech(
+                '../librispeech/LibriSpeech/train-clean-100',
                 tokenizer=tokenizer,
                 transform=transform),
         ]),
@@ -94,7 +106,7 @@ if __name__ == '__main__':
 
     val_dataloader =  DataLoader(
                 dataset=Librispeech(
-                '/mnt/ssd0/ray/LibriSpeech/test-clean',
+                '../librispeech/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             batch_size=50, shuffle=True, num_workers=4,
@@ -158,12 +170,13 @@ if __name__ == '__main__':
                     raw_audio = batch[0]
                     raw_audios = raw_audio[sub_slice]
 
-                    raw_audios = raw_audios.cuda()
-                    loss, sample_size, logging_output = constrast_learner(model, raw_audios, reduce=False)
+                    if len(raw_audios) > 0:
+                        raw_audios = raw_audios.cuda()
+                        loss, sample_size, logging_output = constrast_learner(model, raw_audios, reduce=False)
+                        loss = loss / len(start_idxs)
+                        loss.backward()
+                        losses.append(loss)
 
-                    loss = loss / len(start_idxs)
-                    losses.append(loss)
-                    loss.backward()
                 loss = torch.stack(losses).mean()
 
                 if FLAGS.gradclip is not None:
