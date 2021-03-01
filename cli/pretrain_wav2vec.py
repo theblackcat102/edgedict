@@ -50,6 +50,9 @@ def evaluate(model, dataloader):
             for key, value in logging_output.items():
                 if key not in logging_outputs:
                     logging_outputs[key] = []
+                if FLAGS.multi_gpu and isinstance(value, torch.Tensor):
+                    value = value.mean()
+
                 logging_outputs[key].append(value)
 
     model.train()
@@ -67,36 +70,36 @@ if __name__ == '__main__':
 
     dataloader = DataLoader(
         dataset=MergedDataset([
-            YoutubeCaption(
-                '../yt_speech/', labels='news_dummy.csv',
-                tokenizer=tokenizer,
-                transform=transform,
-                audio_max_length=14,
-            ),
-            YoutubeCaption(
-                '../yt_speech/', labels='life_dummy.csv',
-                tokenizer=tokenizer,
-                transform=transform,
-                audio_max_length=14,
-            ),
+            # YoutubeCaption(
+            #     '../yt_speech/', labels='news_dummy.csv',
+            #     tokenizer=tokenizer,
+            #     transform=transform,
+            #     audio_max_length=14,
+            # ),
+            # YoutubeCaption(
+            #     '../yt_speech/', labels='life_dummy.csv',
+            #     tokenizer=tokenizer,
+            #     transform=transform,
+            #     audio_max_length=14,
+            # ),
+            # Librispeech(
+            #     '../librispeech/LibriSpeech/dev-clean',
+            #     tokenizer=tokenizer,
+            #     transform=transform),
+            # Librispeech(
+            #     '../librispeech/LibriSpeech/dev-other',
+            #     tokenizer=tokenizer,
+            #     transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/dev-clean',
+                '/mnt/ssd0/ray/LibriSpeech/test-other',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/dev-other',
+                '/mnt/ssd1/ray/LibriSpeech/train-clean-360',
                 tokenizer=tokenizer,
                 transform=transform),
             Librispeech(
-                '../librispeech/LibriSpeech/test-other',
-                tokenizer=tokenizer,
-                transform=transform),
-            Librispeech(
-                '../librispeech/LibriSpeech/train-clean-360',
-                tokenizer=tokenizer,
-                transform=transform),
-            Librispeech(
-                '../librispeech/LibriSpeech/train-clean-100',
+                '/mnt/ssd1/ray/LibriSpeech/train-clean-100',
                 tokenizer=tokenizer,
                 transform=transform),
         ]),
@@ -106,7 +109,7 @@ if __name__ == '__main__':
 
     val_dataloader =  DataLoader(
                 dataset=Librispeech(
-                '../librispeech/LibriSpeech/test-clean',
+                '/mnt/ssd0/ray/LibriSpeech/test-clean',
                 tokenizer=tokenizer,
                 transform=transform),
             batch_size=50, shuffle=True, num_workers=4,
@@ -153,10 +156,12 @@ if __name__ == '__main__':
     for key, value in eval_output.items():
         tensorboard.add_scalar('val/'+key, value, global_step)
 
+    if FLAGS.multi_gpu:
+        model = torch.nn.DataParallel(model)
+
+
     start_idxs = list(range(0, FLAGS.batch_size, FLAGS.sub_batch_size))
-
     best_correct = -1
-
     with tqdm(total=int(len(dataloader)*total_epochs), dynamic_ncols=True) as pbar:
         for e in range(total_epochs):
 
@@ -165,6 +170,8 @@ if __name__ == '__main__':
 
                 start_idxs = range(0, FLAGS.batch_size, FLAGS.sub_batch_size)
                 losses = []
+                logging_outputs = {}
+
                 for sub_batch_idx, start_idx in enumerate(start_idxs):
                     sub_slice = slice(start_idx, start_idx + FLAGS.sub_batch_size)
                     raw_audio = batch[0]
@@ -173,7 +180,11 @@ if __name__ == '__main__':
                     if len(raw_audios) > 0:
                         raw_audios = raw_audios.cuda()
                         loss, sample_size, logging_output = constrast_learner(model, raw_audios, reduce=False)
-                        loss = loss / len(start_idxs)
+                        if FLAGS.multi_gpu:
+                            loss = loss.mean() / len(start_idxs)
+                        else:
+                            loss = loss / len(start_idxs)
+
                         loss.backward()
                         losses.append(loss)
 
@@ -191,6 +202,8 @@ if __name__ == '__main__':
                     model.input_quantizer.set_num_updates(global_step)
 
                 for key, value in logging_output.items():
+                    if FLAGS.multi_gpu and isinstance(value, torch.Tensor):
+                        value = value.mean()
                     tensorboard.add_scalar('train/'+key, value, global_step)
 
                 global_step += 1
@@ -203,5 +216,6 @@ if __name__ == '__main__':
                         tensorboard.add_scalar('val/'+key, value, global_step)
                     tensorboard.flush()
                     if eval_output['correct'] > best_correct:
-                        torch.save(model.state_dict(), 'pretrained_test.pt')
+                        if FLAGS.multi_gpu
+                        torch.save(model.module.state_dict(), 'pretrained_test.pt')
                         best_correct = eval_output['correct']

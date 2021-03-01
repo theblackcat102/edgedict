@@ -348,6 +348,7 @@ class FrontEnd(nn.Module):
             DilatedConvBlock(channels[idx-1], channels[idx], kernel_size=kernel_sizes[idx], dilation=1, stride=strides[idx], group_norm_size=1, bias=bias)
             for idx in range(1, len(strides))
         ])
+        self.layer_norm = nn.LayerNorm(frontend_params[-1][-1])
 
     def forward(self, x):
 
@@ -356,7 +357,12 @@ class FrontEnd(nn.Module):
 
         x = self.conv1(x)
         x = x[:, :, :-self.conv1.padding[0]]
-        return self.encode(x)
+        features = self.encode(x)
+        # convert B x C x T -> B x T x C
+        features = features.transpose(1, 2)
+        features = self.layer_norm(features)
+        return features
+
 
 def convert_lightning2normal(checkpoint):
     keys = checkpoint.keys()

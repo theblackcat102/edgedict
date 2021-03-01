@@ -264,9 +264,6 @@ class Wav2Vec(nn.Module):
     def forward(self, source, padding_mask=None, mask=True, features_only=False):
         features = self.frontend(source)
 
-        # convert B x C x T -> B x T x C
-        features = features.transpose(1, 2)
-        features = self.layer_norm(features)
         unmasked_features = features.clone()
 
         features_pen = features.clone().float().pow(2).mean()
