@@ -23,6 +23,11 @@ flags.DEFINE_integer('eval_iteration', 1000, help='evaluate every iterations')
 flags.DEFINE_float('feature_grad_mult', 0.1, help='feature gradient multiplication weight')
 
 
+flags.DEFINE_float('beta1', 0.9, help='adam beta 0')
+flags.DEFINE_float('beta2', 0.998, help='adam beta - second momentum')
+flags.DEFINE_float('weight_decay', 0.01, help='weight decay')
+
+
 flags.DEFINE_integer('num_negatives', 100, help='num negatives sample for constrastive learning')
 flags.DEFINE_integer('enc_proj_size', 512, help='encoder projection size')
 flags.DEFINE_integer('enc_layers', 4, help='number of encoding layers')

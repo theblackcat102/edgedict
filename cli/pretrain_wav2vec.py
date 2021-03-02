@@ -139,8 +139,8 @@ if __name__ == '__main__':
 
     global_step = 0
     optimizer = AdamW(
-        get_params_without_weight_decay_ln(model.named_parameters(), 1e-5),
-        lr=FLAGS.lr, betas=(0.9, 0.999), eps=1e-08)
+        get_params_without_weight_decay_ln(model.named_parameters(), FLAGS.weight_decay),
+        lr=FLAGS.lr, betas=(FLAGS.beta1, FLAGS.beta2), eps=1e-08)
 
     total_epochs = FLAGS.epochs
     total_iterations = len(dataloader) * total_epochs
@@ -218,4 +218,6 @@ if __name__ == '__main__':
                     if eval_output['correct'] > best_correct:
                         if FLAGS.multi_gpu:
                             torch.save(model.module.state_dict(), 'pretrained_test.pt')
+                        else:
+                            torch.save(model.state_dict(), 'pretrained_test.pt')
                         best_correct = eval_output['correct']

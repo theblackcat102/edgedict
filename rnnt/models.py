@@ -342,6 +342,7 @@ class FrontEnd(nn.Module):
         channels=[ p[2] for p in frontend_params]
 
         assert len(kernel_sizes) == len(strides)
+
         self.conv1 = CausalConv1d(1, channels[0], kernel_size=kernel_sizes[0], dilation=1, stride=strides[0], bias=bias)
 
         self.encode = nn.Sequential(*[
