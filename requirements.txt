@@ -4,7 +4,6 @@ attrs==19.3.0
 audioread==2.1.8
 av==8.0.2
 backcall==0.1.0
-bleach==3.1.5
 cffi==1.14.0
 cycler==0.10.0
 decorator==4.4.2
@@ -17,7 +16,6 @@ ipython==7.15.0
 ipython-genutils==0.2.0
 ipywidgets==7.5.1
 jedi==0.17.0
-Jinja2==2.11.2
 jiwer==2.1.0
 joblib==0.15.1
 jsonschema==3.2.0
@@ -33,7 +31,6 @@ matplotlib==3.2.1
 mistune==0.8.4
 nbconvert==5.6.1
 nbformat==5.0.6
-notebook==6.0.3
 numba==0.48.0
 numpy==1.18.4
 packaging==20.4
@@ -48,7 +45,6 @@ protobuf==3.12.2
 ptyprocess==0.6.0
 pycparser==2.20
 pydub==0.24.0
-Pygments==2.6.1
 pyparsing==2.4.7
 pyrsistent==0.16.0
 python-dateutil==2.8.1
